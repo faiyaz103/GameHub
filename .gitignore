@@ -1,0 +1,6 @@
+# Visual Studio
+.vs/
+*.user
+x64/
+Debug/
+Release/
