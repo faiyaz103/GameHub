@@ -259,7 +259,7 @@ int main()
     Shader phongShader(vertexShaderPhongSource, fragmentShaderPhongSource);
     Shader gouraudShader(vertexShaderGouraudSource, fragmentShaderGouraudSource);
 
-    unsigned int poolStickerTexture = loadTexture("Designer.png");
+    unsigned int poolStickerTexture = loadTexture("resources/Designer.png");
     // Removed wall_image.jpg loading
 
     float vertices[] = {
@@ -508,10 +508,6 @@ void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture
     model = glm::translate(glm::mat4(1.0f), poolCenter);
     model = glm::scale(model, glm::vec3(3.0f, 0.1f, 4.5f));
     drawCube(VAO, shader, model, feltGreen, 0);
-
-    glm::mat4 stickerModel = glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3(0.0f, 0.052f, 0.0f));
-    stickerModel = glm::scale(stickerModel, glm::vec3(1.5f, 0.001f, 2.0f));
-    drawCube(VAO, shader, stickerModel, feltGreen, poolTexture);
 
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3(0.0f, 0.1f, -2.3f)), glm::vec3(3.2f, 0.2f, 0.2f)), woodColor);
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3(0.0f, 0.1f, 2.3f)), glm::vec3(3.2f, 0.2f, 0.2f)), woodColor);
