@@ -24,6 +24,7 @@ unsigned int loadTexture(char const* path);
 void drawCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color, unsigned int textureID = 0, glm::vec2 texScale = glm::vec2(1.0f, 1.0f));
 void drawLightCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color);
 void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture, unsigned int grassTexture);
+void drawSkyAndSun(unsigned int VAO, Shader& lightCubeShader, glm::mat4 projection, glm::mat4 view, glm::vec3 eye);
 void drawAllLights(unsigned int VAO, Shader& lightCubeShader, glm::mat4 projection, glm::mat4 view);
 void setLightUniforms(Shader& shader);
 // New geometry helpers (Surface of Revolution + GL_TRIANGLE_FAN)
@@ -145,6 +146,13 @@ const std::string fragmentShaderPhongSource = R"(
         vec3  specular;
     };
 
+    struct DirLight {
+        vec3 direction;
+        vec3 ambient;
+        vec3 diffuse;
+        vec3 specular;
+    };
+
     struct SpotLight {
         vec3  position;
         vec3  direction;
@@ -169,12 +177,25 @@ const std::string fragmentShaderPhongSource = R"(
 
     uniform PointLight pointLights[NR_POINT_LIGHTS];
     uniform SpotLight  spotLights[NR_SPOT_LIGHTS];
+    uniform DirLight   dirLight;
     uniform bool enablePoint[NR_POINT_LIGHTS];
     uniform bool enableSpot[NR_SPOT_LIGHTS];
+    uniform bool enableDir;
     uniform bool enableAmbient;
     uniform bool enableDiffuse;
     uniform bool enableSpecular;
     uniform vec2 texScale;
+
+    vec3 CalcDirLight(DirLight light, vec3 normal, vec3 viewDir) {
+        vec3 lightDir = normalize(-light.direction);
+        float diff = max(dot(normal, lightDir), 0.0);
+        vec3 reflectDir = reflect(-lightDir, normal);
+        float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+        vec3 ambient  = enableAmbient  ? light.ambient  : vec3(0.0);
+        vec3 diffuse  = enableDiffuse  ? light.diffuse  * diff : vec3(0.0);
+        vec3 specular = enableSpecular ? light.specular * spec : vec3(0.0);
+        return (ambient + diffuse + specular);
+    }
 
     vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
         vec3  lightDir   = normalize(light.position - fragPos);
@@ -208,7 +229,8 @@ const std::string fragmentShaderPhongSource = R"(
     void main() {
         vec3 norm    = normalize(Normal);
         vec3 viewDir = normalize(viewPos - FragPos);
-        vec3 result  = vec3(0.03);
+        vec3 result  = vec3(0.0);
+        if (enableDir) result += CalcDirLight(dirLight, norm, viewDir);
         for (int i = 0; i < NR_POINT_LIGHTS; i++)
             if (enablePoint[i]) result += CalcPointLight(pointLights[i], norm, FragPos, viewDir);
         for (int i = 0; i < NR_SPOT_LIGHTS; i++)
@@ -245,6 +267,14 @@ const std::string vertexShaderGouraudSource = R"(
         vec3  diffuse;
         vec3  specular;
     };
+
+    struct DirLight {
+        vec3 direction;
+        vec3 ambient;
+        vec3 diffuse;
+        vec3 specular;
+    };
+
     struct SpotLight {
         vec3  position;
         vec3  direction;
@@ -264,12 +294,25 @@ const std::string vertexShaderGouraudSource = R"(
     uniform vec3 viewPos;
     uniform PointLight pointLights[NR_POINT_LIGHTS];
     uniform SpotLight  spotLights[NR_SPOT_LIGHTS];
+    uniform DirLight   dirLight;
     uniform bool enablePoint[NR_POINT_LIGHTS];
     uniform bool enableSpot[NR_SPOT_LIGHTS];
+    uniform bool enableDir;
     uniform bool enableAmbient;
     uniform bool enableDiffuse;
     uniform bool enableSpecular;
     uniform vec2 texScale;
+
+    vec3 CalcDirLight(DirLight light, vec3 normal, vec3 viewDir) {
+        vec3 lightDir = normalize(-light.direction);
+        float diff = max(dot(normal, lightDir), 0.0);
+        vec3 reflectDir = reflect(-lightDir, normal);
+        float spec = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
+        vec3 ambient  = enableAmbient  ? light.ambient  : vec3(0.0);
+        vec3 diffuse  = enableDiffuse  ? light.diffuse  * diff : vec3(0.0);
+        vec3 specular = enableSpecular ? light.specular * spec : vec3(0.0);
+        return (ambient + diffuse + specular);
+    }
 
     vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
         vec3  lightDir   = normalize(light.position - fragPos);
@@ -304,7 +347,8 @@ const std::string vertexShaderGouraudSource = R"(
         vec3 Normal  = normalize(mat3(transpose(inverse(model))) * aNormal);
         TexCoords    = aTexCoords * texScale;
         vec3 viewDir = normalize(viewPos - FragPos);
-        vec3 result  = vec3(0.03);
+        vec3 result  = vec3(0.0);
+        if (enableDir) result += CalcDirLight(dirLight, Normal, viewDir);
         for (int i = 0; i < NR_POINT_LIGHTS; i++)
             if (enablePoint[i]) result += CalcPointLight(pointLights[i], Normal, FragPos, viewDir);
         for (int i = 0; i < NR_SPOT_LIGHTS; i++)
@@ -340,18 +384,39 @@ const std::string fragmentShaderGouraudSource = R"(
 const std::string vertexShaderLightCubeSource = R"(
     #version 330 core
     layout (location = 0) in vec3 aPos;
+    out vec3 LocalPos;
     uniform mat4 model;
     uniform mat4 view;
     uniform mat4 projection;
     void main() {
+        LocalPos = aPos;
         gl_Position = projection * view * model * vec4(aPos, 1.0);
     }
 )";
 const std::string fragmentShaderLightCubeSource = R"(
     #version 330 core
     out vec4 FragColor;
+    in vec3 LocalPos;
     uniform vec3 objectColor;
-    void main() { FragColor = vec4(objectColor, 1.0); }
+    uniform bool isSun;
+    uniform bool isSky;
+    void main() {
+        if (isSky) {
+            float h = normalize(LocalPos).y;
+            // Realistic sky gradient: deep blue zenith to light blue/white horizon
+            vec3 skyTop = vec3(0.1f, 0.35f, 0.8f);
+            vec3 skyBot = vec3(0.75f, 0.85f, 1.0f);
+            vec3 res = mix(skyBot, skyTop, clamp(h * 0.8 + 0.2, 0.0, 1.0));
+            FragColor = vec4(res, 1.0);
+        } else if (isSun) {
+            // Sun with a simple core and glow
+            float dist = length(LocalPos);
+            float glow = 1.0 - smoothstep(0.7, 1.0, dist);
+            FragColor = vec4(objectColor, 1.0); 
+        } else {
+            FragColor = vec4(objectColor, 1.0);
+        }
+    }
 )";
 
 // ==========================================
@@ -465,8 +530,10 @@ int main()
 
         if (!isSplitView) {
             glViewport(0, 0, displayW, displayH);
-            glm::mat4 proj = glm::perspective(glm::radians(45.0f), (float)displayW / displayH, 0.1f, 100.0f);
+            glm::mat4 proj = glm::perspective(glm::radians(45.0f), (float)displayW / displayH, 0.1f, 400.0f); // increased far plane for sky
             glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+            drawSkyAndSun(VAO, lightCubeShader, proj, view, cameraPos);
+            activeShader.use();
             activeShader.setMat4("projection", proj);
             activeShader.setMat4("view", view);
             drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
@@ -474,29 +541,36 @@ int main()
         }
         else {
             float ar = (float)(displayW / 2) / (float)(displayH / 2);
-            glm::mat4 proj = glm::perspective(glm::radians(45.0f), ar, 0.1f, 100.0f);
+            glm::mat4 proj = glm::perspective(glm::radians(45.0f), ar, 0.1f, 400.0f);
             glm::mat4 view;
 
             glViewport(0, displayH / 2, displayW / 2, displayH / 2);
-            view = glm::lookAt(glm::vec3(0.0f, 15.0f, 0.1f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            glm::vec3 eye1 = glm::vec3(0.0f, 15.0f, 0.1f);
+            view = glm::lookAt(eye1, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            drawSkyAndSun(VAO, lightCubeShader, proj, view, eye1);
             activeShader.use(); activeShader.setMat4("projection", proj); activeShader.setMat4("view", view);
             drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(displayW / 2, displayH / 2, displayW / 2, displayH / 2);
-            view = glm::lookAt(glm::vec3(14.0f, 3.0f, 0.0f), glm::vec3(0.0f, 3.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            glm::vec3 eye2 = glm::vec3(14.0f, 3.0f, 0.0f);
+            view = glm::lookAt(eye2, glm::vec3(0.0f, 3.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            drawSkyAndSun(VAO, lightCubeShader, proj, view, eye2);
             activeShader.use(); activeShader.setMat4("view", view);
             drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(0, 0, displayW / 2, displayH / 2);
-            view = glm::lookAt(glm::vec3(0.0f, 2.0f, 14.0f), glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            glm::vec3 eye3 = glm::vec3(0.0f, 2.0f, 14.0f);
+            view = glm::lookAt(eye3, glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+            drawSkyAndSun(VAO, lightCubeShader, proj, view, eye3);
             activeShader.use(); activeShader.setMat4("view", view);
             drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(displayW / 2, 0, displayW / 2, displayH / 2);
             view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
+            drawSkyAndSun(VAO, lightCubeShader, proj, view, cameraPos);
             activeShader.use(); activeShader.setMat4("view", view);
             drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
@@ -555,6 +629,13 @@ void setLightUniforms(Shader& shader) {
         shader.setFloat(n + "linear",    0.045f);
         shader.setFloat(n + "quadratic", 0.0075f);
     }
+
+    // ─── Sun (Directional Light) ──────────────────────────────────────────────
+    shader.setBool("enableDir", true);
+    shader.setVec3("dirLight.direction", glm::vec3(-0.2f, -1.0f, -0.3f));
+    shader.setVec3("dirLight.ambient",   glm::vec3(0.25f, 0.25f, 0.22f)); // Warmer ambient
+    shader.setVec3("dirLight.diffuse",   glm::vec3(1.0f, 0.98f, 0.85f));  // Brighter, warmer sun
+    shader.setVec3("dirLight.specular",  glm::vec3(0.8f, 0.8f, 0.7f));    // Stronger specular
 }
 
 // ==========================================
@@ -728,12 +809,42 @@ void drawDisk(Shader& shader, glm::mat4 model, glm::vec3 color) {
 }
 
 // ==========================================
+// DRAW SKY AND SUN
+// ==========================================
+void drawSkyAndSun(unsigned int VAO, Shader& lightCubeShader, glm::mat4 projection, glm::mat4 view, glm::vec3 eye) {
+    lightCubeShader.use();
+    lightCubeShader.setMat4("projection", projection);
+    lightCubeShader.setMat4("view", view);
+
+    // ─── SKY ──────────────────────────────────────────────────────────────
+    // Draw the sky first with depth writing disabled.
+    // This ensures it stays in the background and avoids the "box" feel.
+    glDepthMask(GL_FALSE);
+    lightCubeShader.setBool("isSky", true);
+    lightCubeShader.setBool("isSun", false);
+    // Huge sphere for the sky, centered at the eye position to keep it distant.
+    // Using a radius of 250 to ensure it's outside all scene objects.
+    drawSphere(lightCubeShader, glm::scale(glm::translate(glm::mat4(1.0f), eye), glm::vec3(250.0f)), glm::vec3(1.0f));
+    glDepthMask(GL_TRUE);
+
+    // ─── SUN ──────────────────────────────────────────────────────────────
+    lightCubeShader.setBool("isSky", false);
+    lightCubeShader.setBool("isSun", true);
+    // Placed far away in the sky. Positioned to match the light direction.
+    glm::mat4 sunM = glm::translate(glm::mat4(1.0f), glm::vec3(50.0f, 150.0f, 70.0f));
+    drawSphere(lightCubeShader, glm::scale(sunM, glm::vec3(12.0f)), glm::vec3(1.0f, 0.98f, 0.85f));
+    lightCubeShader.setBool("isSun", false);
+}
+
+// ==========================================
 // DRAW ALL LIGHT FIXTURES
 // ==========================================
 void drawAllLights(unsigned int VAO, Shader& lightCubeShader, glm::mat4 projection, glm::mat4 view) {
     lightCubeShader.use();
     lightCubeShader.setMat4("projection", projection);
     lightCubeShader.setMat4("view", view);
+    lightCubeShader.setBool("isSky", false);
+    lightCubeShader.setBool("isSun", false);
 
     glm::vec3 bulbColor    = glm::vec3(1.0f, 0.95f, 0.75f);
     glm::vec3 cordColor    = glm::vec3(0.15f, 0.12f, 0.10f);
