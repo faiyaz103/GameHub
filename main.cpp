@@ -1073,16 +1073,23 @@ void drawTableTennis(unsigned int VAO, Shader& shader) {
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(-1.52f,0.041f,0.0f)), glm::vec3(0.04f,0.018f,1.64f)), edgeWood);
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 1.52f,0.041f,0.0f)), glm::vec3(0.04f,0.018f,1.64f)), edgeWood);
 
-    // ── White boundary lines painted on baize (y = ttTop + 0.001) ────────────
-    const float ly = ttTop + 0.001f;
-    // Side lines (along x, at z edges)
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x,ly,C.z-0.77f)), glm::vec3(2.96f,0.003f,0.014f)), lineWhite);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x,ly,C.z+0.77f)), glm::vec3(2.96f,0.003f,0.014f)), lineWhite);
-    // End lines (along z, at x edges)
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x-1.47f,ly,C.z)), glm::vec3(0.014f,0.003f,1.54f)), lineWhite);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x+1.47f,ly,C.z)), glm::vec3(0.014f,0.003f,1.54f)), lineWhite);
-    // Centre line (along z, at x=0) – used in doubles
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x,ly,C.z)),       glm::vec3(0.008f,0.003f,1.54f)), lineWhite);
+    // ── White boundary lines painted on baize (y = ttTop + 0.002f to avoid z-fighting) ──────────
+    const float ly = ttTop + 0.002f;
+    const float lineThick = 0.02f; // 2cm wide lines
+    
+    // Side lines (along length X, at width Z edges)
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, ly, C.z - 0.79f)), glm::vec3(3.0f, 0.004f, lineThick)), lineWhite);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, ly, C.z + 0.79f)), glm::vec3(3.0f, 0.004f, lineThick)), lineWhite);
+    
+    // End lines (along width Z, at length X edges)
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x - 1.49f, ly, C.z)), glm::vec3(lineThick, 0.004f, 1.6f)), lineWhite);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x + 1.49f, ly, C.z)), glm::vec3(lineThick, 0.004f, 1.6f)), lineWhite);
+    
+    // Centre divider line (DOUBLES line) - runs along length (X) in the middle of width (Z)
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, ly, C.z)),       glm::vec3(3.0f, 0.004f, 0.008f)), lineWhite);
+    
+    // Middle line (under the net) - runs along width (Z) in the middle of length (X)
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, ly, C.z)),       glm::vec3(0.012f, 0.004f, 1.6f)), lineWhite);
 
     // ── Underframe apron panels (metal, around perimeter below surface) ───────
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 0.0f,-0.065f,-0.79f)), glm::vec3(2.96f,0.10f,0.040f)), metalFrame);
