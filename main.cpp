@@ -34,6 +34,10 @@ void drawDisk(Shader& shader, glm::mat4 model, glm::vec3 color);
 // Pool table sub-functions
 void drawPoolTable(unsigned int VAO, Shader& shader);
 void drawPoolBalls(Shader& shader);
+// Table tennis sub-functions
+void drawTableTennis(unsigned int VAO, Shader& shader);
+void drawTableTennisBalls(Shader& shader);
+void drawTableTennisPaddles(unsigned int VAO, Shader& shader);
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 const unsigned int SCR_WIDTH  = 1200;
@@ -974,26 +978,179 @@ void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture
     drawPoolTable(VAO, shader);
     drawPoolBalls(shader);
 
-    // 3. TABLE TENNIS ─────────────────────────────────────────────────────────
-    glm::vec3 ttCenter  = glm::vec3(4.0f, 0.8f, -2.0f);
-    glm::vec3 blueTable = glm::vec3(0.10f, 0.30f, 0.70f);
-    glm::vec3 metalLegs = glm::vec3(0.20f, 0.20f, 0.20f);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter), glm::vec3(3.0f,0.05f,1.6f)), blueTable);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter+glm::vec3(0,0.10f,0)), glm::vec3(0.02f,0.15f,1.7f)), glm::vec3(0.9f));
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter+glm::vec3(-1.4f,-0.4f,-0.7f)), glm::vec3(0.05f,0.8f,0.05f)), metalLegs);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter+glm::vec3(-1.4f,-0.4f, 0.7f)), glm::vec3(0.05f,0.8f,0.05f)), metalLegs);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter+glm::vec3( 1.4f,-0.4f,-0.7f)), glm::vec3(0.05f,0.8f,0.05f)), metalLegs);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter+glm::vec3( 1.4f,-0.4f, 0.7f)), glm::vec3(0.05f,0.8f,0.05f)), metalLegs);
+    // 3. TABLE TENNIS – realistic with net, painted lines, balls, paddles ─────
+    drawTableTennis(VAO, shader);
+    drawTableTennisBalls(shader);
+    drawTableTennisPaddles(VAO, shader);
 
     // 4. CARROM BOARD ─────────────────────────────────────────────────────────
     glm::vec3 carromCenter = glm::vec3(4.0f, 0.6f, 3.0f);
     glm::vec3 frameWood    = glm::vec3(0.30f, 0.15f, 0.05f);
+    glm::vec3 metalLegs    = glm::vec3(0.20f, 0.20f, 0.20f);
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter-glm::vec3(0,0.3f,0)), glm::vec3(0.8f,0.6f,0.8f)), metalLegs);
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter), glm::vec3(1.2f,0.05f,1.2f)), glm::vec3(0.80f,0.60f,0.40f));
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3( 0,0.05f,-0.65f)), glm::vec3(1.4f,0.1f,0.1f)), frameWood);
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3( 0,0.05f, 0.65f)), glm::vec3(1.4f,0.1f,0.1f)), frameWood);
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3(-0.65f,0.05f,0)), glm::vec3(0.1f,0.1f,1.4f)), frameWood);
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3( 0.65f,0.05f,0)), glm::vec3(0.1f,0.1f,1.4f)), frameWood);
+}
+
+// ==========================================
+// TABLE TENNIS – Realistic Ping-Pong Table
+// Centre: world (4, 0.8, -2)
+// Surface: 3.0 (x-length) × 1.6 (z-width)
+// ==========================================
+void drawTableTennis(unsigned int VAO, Shader& shader) {
+    const glm::vec3 C  = glm::vec3(4.0f, 0.8f, -2.0f);
+    const float ttTop  = C.y + 0.04f;  // surface y = 0.84
+
+    const glm::vec3 tableBlue  = glm::vec3(0.08f, 0.25f, 0.65f);  // tournament blue baize
+    const glm::vec3 metalFrame = glm::vec3(0.18f, 0.20f, 0.22f);  // dark aluminium frame
+    const glm::vec3 lineWhite  = glm::vec3(0.95f, 0.95f, 0.92f);  // painted boundary lines
+    const glm::vec3 netWhite   = glm::vec3(0.90f, 0.90f, 0.88f);  // net mesh
+    const glm::vec3 netPost    = glm::vec3(0.28f, 0.28f, 0.30f);  // net post metal
+    const glm::vec3 edgeWood   = glm::vec3(0.48f, 0.30f, 0.10f);  // wood edge banding
+
+    // ── Playing surface ──────────────────────────────────────────────────────
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C), glm::vec3(3.0f,0.08f,1.6f)), tableBlue);
+
+    // ── Wood edge banding (thin strip around table perimeter at surface level) 
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 0.0f,0.041f,-0.82f)), glm::vec3(3.02f,0.018f,0.04f)), edgeWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 0.0f,0.041f, 0.82f)), glm::vec3(3.02f,0.018f,0.04f)), edgeWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(-1.52f,0.041f,0.0f)), glm::vec3(0.04f,0.018f,1.64f)), edgeWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 1.52f,0.041f,0.0f)), glm::vec3(0.04f,0.018f,1.64f)), edgeWood);
+
+    // ── White boundary lines painted on baize (y = ttTop + 0.001) ────────────
+    const float ly = ttTop + 0.001f;
+    // Side lines (along x, at z edges)
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x,ly,C.z-0.77f)), glm::vec3(2.96f,0.003f,0.014f)), lineWhite);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x,ly,C.z+0.77f)), glm::vec3(2.96f,0.003f,0.014f)), lineWhite);
+    // End lines (along z, at x edges)
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x-1.47f,ly,C.z)), glm::vec3(0.014f,0.003f,1.54f)), lineWhite);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x+1.47f,ly,C.z)), glm::vec3(0.014f,0.003f,1.54f)), lineWhite);
+    // Centre line (along z, at x=0) – used in doubles
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x,ly,C.z)),       glm::vec3(0.008f,0.003f,1.54f)), lineWhite);
+
+    // ── Underframe apron panels (metal, around perimeter below surface) ───────
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 0.0f,-0.065f,-0.79f)), glm::vec3(2.96f,0.10f,0.040f)), metalFrame);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 0.0f,-0.065f, 0.79f)), glm::vec3(2.96f,0.10f,0.040f)), metalFrame);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(-1.49f,-0.065f,0.0f)), glm::vec3(0.040f,0.10f,1.58f)), metalFrame);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 1.49f,-0.065f,0.0f)), glm::vec3(0.040f,0.10f,1.58f)), metalFrame);
+
+    // ── Four adjustable legs ──────────────────────────────────────────────────
+    const glm::vec3 LP[4] = {
+        {-1.38f,-0.45f,-0.72f}, { 1.38f,-0.45f,-0.72f},
+        {-1.38f,-0.45f, 0.72f}, { 1.38f,-0.45f, 0.72f}
+    };
+    for (const auto& lp : LP)
+        drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+lp), glm::vec3(0.055f,0.90f,0.055f)), metalFrame);
+
+    // Leg cross-bar supports (for structural stability)
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 0.0f,-0.66f,-0.72f)), glm::vec3(2.76f,0.040f,0.040f)), metalFrame);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 0.0f,-0.66f, 0.72f)), glm::vec3(2.76f,0.040f,0.040f)), metalFrame);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(-1.38f,-0.66f,0.0f)), glm::vec3(0.040f,0.040f,1.44f)), metalFrame);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 1.38f,-0.66f,0.0f)), glm::vec3(0.040f,0.040f,1.44f)), metalFrame);
+
+    // ── Net structure (15.25 cm high → 0.15 world units) ─────────────────────
+    const float netH   = 0.15f;
+    const float netMY  = ttTop + netH * 0.5f;   // net vertical midpoint
+    const float netTY  = ttTop + netH;           // net top
+
+    // Net posts (4 cm outside table edge on each side)
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, netMY, C.z-0.84f)), glm::vec3(0.030f,netH+0.02f,0.030f)), netPost);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, netMY, C.z+0.84f)), glm::vec3(0.030f,netH+0.02f,0.030f)), netPost);
+    // Post clamp at table z-edge
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, ttTop+0.012f, C.z-0.81f)), glm::vec3(0.055f,0.042f,0.042f)), netPost);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, ttTop+0.012f, C.z+0.81f)), glm::vec3(0.055f,0.042f,0.042f)), netPost);
+    // Top cord (runs across z-width between posts)
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x,netTY,C.z)), glm::vec3(0.008f,0.010f,1.72f)), netPost);
+    // Horizontal net cords (mesh appearance, each running along z)
+    for (int k = 0; k < 5; ++k) {
+        float hy = ttTop + 0.018f + k * 0.026f;
+        drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x,hy,C.z)), glm::vec3(0.007f,0.007f,1.68f)), netWhite);
+    }
+    // Vertical net cords (positioned at intervals along z-width)
+    for (int k = -6; k <= 6; ++k) {
+        float vz = C.z + k * 0.133f;
+        drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x,netMY+0.01f,vz)), glm::vec3(0.007f,netH-0.02f,0.007f)), netWhite);
+    }
+}
+
+// ==========================================
+// TABLE TENNIS BALLS – 2 white ping-pong balls (spheres)
+// Radius 0.04 world-units (≈ real 40 mm diameter)
+// ==========================================
+void drawTableTennisBalls(Shader& shader) {
+    const glm::vec3 C  = glm::vec3(4.0f, 0.8f, -2.0f);
+    const float ttTop  = C.y + 0.04f;
+    const float ballR  = 0.04f;
+    const float ballY  = ttTop + ballR;   // centre of ball sitting on surface
+    const glm::vec3 ballClr = glm::vec3(0.97f, 0.97f, 0.95f); // white
+
+    // Ball 1 – player 1 side (positive-x half, near side rail)
+    drawSphere(shader,
+        glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x+0.80f, ballY, C.z+0.50f)), glm::vec3(ballR)),
+        ballClr);
+    // Ball 2 – player 2 side (negative-x half)
+    drawSphere(shader,
+        glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x-0.70f, ballY, C.z-0.45f)), glm::vec3(ballR)),
+        ballClr);
+}
+
+// ==========================================
+// TABLE TENNIS PADDLES – 2 paddles lying flat on the table
+// Each paddle: circular disk face (GL_TRIANGLE_FAN) + wood handle (cube)
+// ==========================================
+void drawTableTennisPaddles(unsigned int VAO, Shader& shader) {
+    const glm::vec3 C  = glm::vec3(4.0f, 0.8f, -2.0f);
+    const float ttTop  = C.y + 0.04f;
+    const float padY   = ttTop + 0.006f;   // paddle face sits on table surface
+
+    const glm::vec3 redRubber  = glm::vec3(0.82f, 0.07f, 0.07f);  // red rubber face
+    const glm::vec3 blackRubber= glm::vec3(0.10f, 0.08f, 0.08f);  // black rubber back
+    const glm::vec3 handleWood = glm::vec3(0.52f, 0.30f, 0.10f);  // wood handle
+    const glm::vec3 handleEdge = glm::vec3(0.35f, 0.20f, 0.06f);  // handle edge strip
+
+    // ── PADDLE 1 (player-1 side: positive-x, positive-z quadrant) ────────────
+    {
+        const float px = C.x + 0.82f, pz = C.z + 0.38f;
+        // Red disk face (top surface)
+        drawDisk(shader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(px, padY, pz)),
+                       glm::vec3(0.160f, 1.0f, 0.160f)), redRubber);
+        // Black disk back (slightly below)
+        drawDisk(shader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(px, padY-0.003f, pz)),
+                       glm::vec3(0.158f, 1.0f, 0.158f)), blackRubber);
+        // Wood handle (extends in +z from edge of blade)
+        drawCube(VAO, shader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(px, padY-0.006f, pz+0.16f+0.11f)),
+                       glm::vec3(0.055f, 0.022f, 0.22f)), handleWood);
+        // Handle edge trim
+        drawCube(VAO, shader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(px, padY-0.006f, pz+0.16f+0.11f)),
+                       glm::vec3(0.060f, 0.006f, 0.22f)), handleEdge);
+    }
+
+    // ── PADDLE 2 (player-2 side: negative-x, negative-z quadrant) ────────────
+    {
+        const float px = C.x - 0.82f, pz = C.z - 0.38f;
+        // Red face
+        drawDisk(shader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(px, padY, pz)),
+                       glm::vec3(0.160f, 1.0f, 0.160f)), redRubber);
+        // Black back
+        drawDisk(shader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(px, padY-0.003f, pz)),
+                       glm::vec3(0.158f, 1.0f, 0.158f)), blackRubber);
+        // Handle extends in -z from blade edge
+        drawCube(VAO, shader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(px, padY-0.006f, pz-0.16f-0.11f)),
+                       glm::vec3(0.055f, 0.022f, 0.22f)), handleWood);
+        drawCube(VAO, shader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(px, padY-0.006f, pz-0.16f-0.11f)),
+                       glm::vec3(0.060f, 0.006f, 0.22f)), handleEdge);
+    }
 }
 
 // ==========================================
