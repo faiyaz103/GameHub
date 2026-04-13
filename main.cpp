@@ -41,6 +41,7 @@ void drawTableTennisPaddles(unsigned int VAO, Shader& shader);
 // Carrom board sub-functions
 void drawCarromBoard(unsigned int VAO, Shader& shader);
 void drawCarromPieces(Shader& shader);
+void drawSofa(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 baseColor);
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 const unsigned int SCR_WIDTH  = 1200;
@@ -80,6 +81,8 @@ bool diffuseOn   = true;
 bool specularOn  = true;
 bool isSplitView = false;
 bool keyProcessed[1024] = { false };
+bool isDoorOpen = true;
+float currentDoorAngle = 45.0f;
 
 // ─── Shading / Texture ───────────────────────────────────────────────────────
 bool useGouraud      = false;
@@ -941,6 +944,33 @@ void drawPoolBalls(Shader& shader) {
 }
 
 // ==========================================
+// SOFA – Realistic Furniture
+// ==========================================
+void drawSofa(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 baseColor) {
+    glm::vec3 cushionColor = baseColor * 1.2f; // slightly lighter for cushions
+    glm::vec3 darkColor = baseColor * 0.5f;    // darker for legs/base trim
+
+    // model is assumed to define the center of the bottom base of the sofa.
+    // Dimensions approximate: 2.4 wide, 1.0 deep, 1.0 high
+    // Base platform
+    drawCube(VAO, shader, model * glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.15f, 0.0f)), glm::vec3(2.4f, 0.3f, 1.0f)), baseColor);
+    // Legs
+    drawCube(VAO, shader, model * glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-1.1f, 0.05f, -0.4f)), glm::vec3(0.1f, 0.1f, 0.1f)), darkColor);
+    drawCube(VAO, shader, model * glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 1.1f, 0.05f, -0.4f)), glm::vec3(0.1f, 0.1f, 0.1f)), darkColor);
+    drawCube(VAO, shader, model * glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-1.1f, 0.05f,  0.4f)), glm::vec3(0.1f, 0.1f, 0.1f)), darkColor);
+    drawCube(VAO, shader, model * glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 1.1f, 0.05f,  0.4f)), glm::vec3(0.1f, 0.1f, 0.1f)), darkColor);
+    // Seat Cushions (left, right, middle - 3 cushions)
+    drawCube(VAO, shader, model * glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-0.75f, 0.35f, 0.05f)), glm::vec3(0.7f, 0.15f, 0.8f)), cushionColor);
+    drawCube(VAO, shader, model * glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 0.0f, 0.35f, 0.05f)), glm::vec3(0.7f, 0.15f, 0.8f)), cushionColor);
+    drawCube(VAO, shader, model * glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 0.75f, 0.35f, 0.05f)), glm::vec3(0.7f, 0.15f, 0.8f)), cushionColor);
+    // Backrest (covers full width between armrests)
+    drawCube(VAO, shader, model * glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.65f, -0.4f)), glm::vec3(2.2f, 0.6f, 0.2f)), cushionColor);
+    // Armrests (left and right)
+    drawCube(VAO, shader, model * glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-1.15f, 0.5f, 0.0f)), glm::vec3(0.2f, 0.4f, 1.0f)), baseColor);
+    drawCube(VAO, shader, model * glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 1.15f, 0.5f, 0.0f)), glm::vec3(0.2f, 0.4f, 1.0f)), baseColor);
+}
+
+// ==========================================
 // SCENE DRAWING
 // ==========================================
 void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture) {
@@ -972,10 +1002,26 @@ void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-4.5f,3.0f,6.0f)), glm::vec3(7.0f,6.0f,0.1f)), wallColor);
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 4.5f,3.0f,6.0f)), glm::vec3(7.0f,6.0f,0.1f)), wallColor);
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 0.0f,4.5f,6.0f)), glm::vec3(2.0f,3.0f,0.1f)), wallColor);
+    float targetAngle = isDoorOpen ? 75.0f : 0.0f;
+    if (currentDoorAngle < targetAngle) {
+        currentDoorAngle += 150.0f * deltaTime;
+        if (currentDoorAngle > targetAngle) currentDoorAngle = targetAngle;
+    } else if (currentDoorAngle > targetAngle) {
+        currentDoorAngle -= 150.0f * deltaTime;
+        if (currentDoorAngle < targetAngle) currentDoorAngle = targetAngle;
+    }
+
     glm::mat4 door = glm::translate(glm::mat4(1.0f), glm::vec3(-1.0f,1.5f,6.0f));
-    door = glm::rotate(door, glm::radians(45.0f), glm::vec3(0,1,0));
-    door = glm::translate(door, glm::vec3(1.0f,0,0));
-    drawCube(VAO, shader, glm::scale(door, glm::vec3(2.0f,3.0f,0.05f)), glm::vec3(0.35f,0.18f,0.08f));
+    door = glm::rotate(door, glm::radians(currentDoorAngle), glm::vec3(0,1,0));
+    glm::mat4 doorCenter = glm::translate(door, glm::vec3(1.0f,0,0));
+    drawCube(VAO, shader, glm::scale(doorCenter, glm::vec3(2.0f,3.0f,0.05f)), glm::vec3(0.35f,0.18f,0.08f));
+
+    // Door knob based on Surface of Revolution (Sphere)
+    glm::mat4 knobL = glm::translate(doorCenter, glm::vec3(0.8f, -0.1f, -0.06f));
+    drawSphere(shader, glm::scale(knobL, glm::vec3(0.04f, 0.04f, 0.04f)), glm::vec3(0.8f, 0.7f, 0.2f)); // Brass color inside
+    glm::mat4 knobR = glm::translate(doorCenter, glm::vec3(0.8f, -0.1f, 0.06f));
+    drawSphere(shader, glm::scale(knobR, glm::vec3(0.04f, 0.04f, 0.04f)), glm::vec3(0.8f, 0.7f, 0.2f)); // Brass color outside
+    drawCube(VAO, shader, glm::scale(glm::translate(doorCenter, glm::vec3(0.8f, -0.1f, 0.0f)), glm::vec3(0.02f, 0.02f, 0.12f)), glm::vec3(0.7f, 0.6f, 0.1f));
 
     // 2. POOL (BILLIARDS) TABLE – realistic with pockets and balls ─────────────
     drawPoolTable(VAO, shader);
@@ -989,6 +1035,17 @@ void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture
     // 4. CARROM BOARD ─────────────────────────────────────────────────────────
     drawCarromBoard(VAO, shader);
     drawCarromPieces(shader);
+
+    // 5. SOFAS ────────────────────────────────────────────────────────────────
+    // Sofa near Pool Table (West Wall)
+    glm::mat4 poolSofaM = glm::translate(glm::mat4(1.0f), glm::vec3(-7.5f, 0.0f, 0.0f));
+    poolSofaM = glm::rotate(poolSofaM, glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    drawSofa(VAO, shader, poolSofaM, glm::vec3(0.22f, 0.20f, 0.20f)); // Dark grey leather
+
+    // Sofa near Carrom Board (East Wall)
+    glm::mat4 carromSofaM = glm::translate(glm::mat4(1.0f), glm::vec3(7.5f, 0.0f, 3.0f));
+    carromSofaM = glm::rotate(carromSofaM, glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    drawSofa(VAO, shader, carromSofaM, glm::vec3(0.55f, 0.15f, 0.15f)); // Red leather
 }
 
 // ==========================================
@@ -1366,6 +1423,11 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_F9) == GLFW_PRESS) {
         if (!keyProcessed[GLFW_KEY_F9]) { isSplitView = !isSplitView; cout << "Split View " << (isSplitView ? "ON":"OFF") << "\n"; keyProcessed[GLFW_KEY_F9] = true; }
     } else keyProcessed[GLFW_KEY_F9] = false;
+
+    // Door toggle: 0 (Zero)
+    if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) {
+        if (!keyProcessed[GLFW_KEY_0]) { isDoorOpen = !isDoorOpen; cout << "Door " << (isDoorOpen ? "OPEN":"CLOSED") << "\n"; keyProcessed[GLFW_KEY_0] = true; }
+    } else keyProcessed[GLFW_KEY_0] = false;
 }
 
 // ==========================================
