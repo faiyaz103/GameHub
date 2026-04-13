@@ -21,9 +21,9 @@ void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void processInput(GLFWwindow* window);
 unsigned int loadTexture(char const* path);
-void drawCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color, unsigned int textureID = 0);
+void drawCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color, unsigned int textureID = 0, glm::vec2 texScale = glm::vec2(1.0f, 1.0f));
 void drawLightCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color);
-void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture);
+void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture, unsigned int grassTexture);
 void drawAllLights(unsigned int VAO, Shader& lightCubeShader, glm::mat4 projection, glm::mat4 view);
 void setLightUniforms(Shader& shader);
 // New geometry helpers (Surface of Revolution + GL_TRIANGLE_FAN)
@@ -83,10 +83,12 @@ bool isSplitView = false;
 bool keyProcessed[1024] = { false };
 bool isDoorOpen = true;
 float currentDoorAngle = 45.0f;
+bool grassTextureEnabled = true;
 
 // ─── Shading / Texture ───────────────────────────────────────────────────────
 bool useGouraud      = false;
 int  globalTextureMode = 1;   // 0=None, 1=Texture, 2=Blend
+unsigned int grassTextureID;
 
 // ─── Sphere / Disk Geometry (Surface of Revolution) ─────────────────────────
 unsigned int sphereVAO, sphereVBO, sphereEBO;
@@ -110,11 +112,13 @@ const std::string vertexShaderPhongSource = R"(
     uniform mat4 model;
     uniform mat4 view;
     uniform mat4 projection;
+    uniform vec3 viewPos;
+    uniform vec2 texScale;
 
     void main() {
-        FragPos   = vec3(model * vec4(aPos, 1.0));
-        Normal    = mat3(transpose(inverse(model))) * aNormal;
-        TexCoords = aTexCoords;
+        FragPos     = vec3(model * vec4(aPos, 1.0));
+        Normal      = mat3(transpose(inverse(model))) * aNormal;
+        TexCoords   = aTexCoords * texScale;
         gl_Position = projection * view * vec4(FragPos, 1.0);
     }
 )";
@@ -170,6 +174,7 @@ const std::string fragmentShaderPhongSource = R"(
     uniform bool enableAmbient;
     uniform bool enableDiffuse;
     uniform bool enableSpecular;
+    uniform vec2 texScale;
 
     vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
         vec3  lightDir   = normalize(light.position - fragPos);
@@ -264,6 +269,7 @@ const std::string vertexShaderGouraudSource = R"(
     uniform bool enableAmbient;
     uniform bool enableDiffuse;
     uniform bool enableSpecular;
+    uniform vec2 texScale;
 
     vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
         vec3  lightDir   = normalize(light.position - fragPos);
@@ -296,7 +302,7 @@ const std::string vertexShaderGouraudSource = R"(
     void main() {
         vec3 FragPos = vec3(model * vec4(aPos, 1.0));
         vec3 Normal  = normalize(mat3(transpose(inverse(model))) * aNormal);
-        TexCoords    = aTexCoords;
+        TexCoords    = aTexCoords * texScale;
         vec3 viewDir = normalize(viewPos - FragPos);
         vec3 result  = vec3(0.03);
         for (int i = 0; i < NR_POINT_LIGHTS; i++)
@@ -370,6 +376,7 @@ int main()
     Shader lightCubeShader(vertexShaderLightCubeSource, fragmentShaderLightCubeSource);
 
     unsigned int poolStickerTexture = loadTexture("resources/Designer.png");
+    grassTextureID = loadTexture("resources/grass.jpg");
 
     // Cube vertex data: positions, normals, tex coords
     float vertices[] = {
@@ -462,7 +469,7 @@ int main()
             glm::mat4 view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
             activeShader.setMat4("projection", proj);
             activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
         }
         else {
@@ -473,25 +480,25 @@ int main()
             glViewport(0, displayH / 2, displayW / 2, displayH / 2);
             view = glm::lookAt(glm::vec3(0.0f, 15.0f, 0.1f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             activeShader.use(); activeShader.setMat4("projection", proj); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(displayW / 2, displayH / 2, displayW / 2, displayH / 2);
             view = glm::lookAt(glm::vec3(14.0f, 3.0f, 0.0f), glm::vec3(0.0f, 3.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             activeShader.use(); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(0, 0, displayW / 2, displayH / 2);
             view = glm::lookAt(glm::vec3(0.0f, 2.0f, 14.0f), glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             activeShader.use(); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(displayW / 2, 0, displayW / 2, displayH / 2);
             view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
             activeShader.use(); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
         }
 
@@ -583,9 +590,10 @@ unsigned int loadTexture(char const* path) {
 // ==========================================
 // DRAW HELPERS – Cube and Light Cube
 // ==========================================
-void drawCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color, unsigned int textureID) {
+void drawCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color, unsigned int textureID, glm::vec2 texScale) {
     shader.setMat4("model", model);
     shader.setVec3("objectColor", color);
+    shader.setVec2("texScale", texScale);
     if (textureID > 0) {
         shader.setInt("textureMode", globalTextureMode);
         glActiveTexture(GL_TEXTURE0);
@@ -601,6 +609,7 @@ void drawCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color
 void drawLightCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color) {
     shader.setMat4("model", model);
     shader.setVec3("objectColor", color);
+    shader.setVec2("texScale", glm::vec2(1.0f, 1.0f));
     glBindVertexArray(VAO);
     glDrawArrays(GL_TRIANGLES, 0, 36);
 }
@@ -700,6 +709,7 @@ void setupDiskGeometry() {
 void drawSphere(Shader& shader, glm::mat4 model, glm::vec3 color) {
     shader.setMat4("model", model);
     shader.setVec3("objectColor", color);
+    shader.setVec2("texScale", glm::vec2(1.0f, 1.0f));
     shader.setInt("textureMode", 0);
     glBindVertexArray(sphereVAO);
     glDrawElements(GL_TRIANGLES, sphereIndexCount, GL_UNSIGNED_INT, 0);
@@ -710,6 +720,7 @@ void drawSphere(Shader& shader, glm::mat4 model, glm::vec3 color) {
 void drawDisk(Shader& shader, glm::mat4 model, glm::vec3 color) {
     shader.setMat4("model", model);
     shader.setVec3("objectColor", color);
+    shader.setVec2("texScale", glm::vec2(1.0f, 1.0f));
     shader.setInt("textureMode", 0);
     glBindVertexArray(diskVAO);
     glDrawArrays(GL_TRIANGLE_FAN, 0, diskVertexCount);
@@ -973,11 +984,22 @@ void drawSofa(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 baseC
 // ==========================================
 // SCENE DRAWING
 // ==========================================
-void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture) {
+void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture, unsigned int grassTexture) {
     glm::vec3 wallColor  = glm::vec3(0.85f, 0.88f, 0.90f);
     glm::vec3 floorColor = glm::vec3(0.38f, 0.38f, 0.38f);
     glm::vec3 roofColor  = glm::vec3(0.92f, 0.92f, 0.92f);
     glm::vec3 glassColor = glm::vec3(0.40f, 0.70f, 0.90f);
+    glm::vec3 grassColor = glm::vec3(0.13f, 0.55f, 0.13f); // Forest Green
+    glm::vec3 pathColor  = glm::vec3(0.50f, 0.45f, 0.40f); // Sandy brown path
+
+    // 0. COMPOUND & PATHWAY ───────────────────────────────────────────────────
+    // Large compound area (grass)
+    unsigned int grassTexToUse = grassTextureEnabled ? grassTexture : 0;
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.06f, 0.0f)), glm::vec3(50.0f, 0.02f, 50.0f)), grassColor, grassTexToUse, glm::vec2(25.0f, 25.0f));
+
+    // Pathway from the door (door is at z=6, x=0)
+    // Starting at z=6.0 to z=25.0, centered at x=0
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.04f, 15.5f)), glm::vec3(2.0f, 0.03f, 19.0f)), pathColor);
 
     // 1. ROOM ─────────────────────────────────────────────────────────────────
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,0,0)),       glm::vec3(16.0f,0.1f,12.0f)), floorColor);
@@ -1435,6 +1457,11 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_0) == GLFW_PRESS) {
         if (!keyProcessed[GLFW_KEY_0]) { isDoorOpen = !isDoorOpen; cout << "Door " << (isDoorOpen ? "OPEN":"CLOSED") << "\n"; keyProcessed[GLFW_KEY_0] = true; }
     } else keyProcessed[GLFW_KEY_0] = false;
+
+    // Grass Texture toggle: 9
+    if (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS) {
+        if (!keyProcessed[GLFW_KEY_9]) { grassTextureEnabled = !grassTextureEnabled; cout << "Grass Texture " << (grassTextureEnabled ? "ON":"OFF") << "\n"; keyProcessed[GLFW_KEY_9] = true; }
+    } else keyProcessed[GLFW_KEY_9] = false;
 }
 
 // ==========================================
