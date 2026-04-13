@@ -38,6 +38,9 @@ void drawPoolBalls(Shader& shader);
 void drawTableTennis(unsigned int VAO, Shader& shader);
 void drawTableTennisBalls(Shader& shader);
 void drawTableTennisPaddles(unsigned int VAO, Shader& shader);
+// Carrom board sub-functions
+void drawCarromBoard(unsigned int VAO, Shader& shader);
+void drawCarromPieces(Shader& shader);
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 const unsigned int SCR_WIDTH  = 1200;
@@ -984,15 +987,8 @@ void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture
     drawTableTennisPaddles(VAO, shader);
 
     // 4. CARROM BOARD ─────────────────────────────────────────────────────────
-    glm::vec3 carromCenter = glm::vec3(4.0f, 0.6f, 3.0f);
-    glm::vec3 frameWood    = glm::vec3(0.30f, 0.15f, 0.05f);
-    glm::vec3 metalLegs    = glm::vec3(0.20f, 0.20f, 0.20f);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter-glm::vec3(0,0.3f,0)), glm::vec3(0.8f,0.6f,0.8f)), metalLegs);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter), glm::vec3(1.2f,0.05f,1.2f)), glm::vec3(0.80f,0.60f,0.40f));
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3( 0,0.05f,-0.65f)), glm::vec3(1.4f,0.1f,0.1f)), frameWood);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3( 0,0.05f, 0.65f)), glm::vec3(1.4f,0.1f,0.1f)), frameWood);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3(-0.65f,0.05f,0)), glm::vec3(0.1f,0.1f,1.4f)), frameWood);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3( 0.65f,0.05f,0)), glm::vec3(0.1f,0.1f,1.4f)), frameWood);
+    drawCarromBoard(VAO, shader);
+    drawCarromPieces(shader);
 }
 
 // ==========================================
@@ -1151,6 +1147,152 @@ void drawTableTennisPaddles(unsigned int VAO, Shader& shader) {
             glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(px, padY-0.006f, pz-0.16f-0.11f)),
                        glm::vec3(0.060f, 0.006f, 0.22f)), handleEdge);
     }
+}
+
+// ==========================================
+// CARROM BOARD – Realistic version
+// Surface: smooth plywood with lines and 4 pockets (disks)
+// ==========================================
+void drawCarromBoard(unsigned int VAO, Shader& shader) {
+    const glm::vec3 C = glm::vec3(4.0f, 0.6f, 3.0f);
+
+    const glm::vec3 plywood    = glm::vec3(0.92f, 0.82f, 0.68f);
+    const glm::vec3 frameWood  = glm::vec3(0.35f, 0.18f, 0.08f); 
+    const glm::vec3 pocketClr  = glm::vec3(0.04f, 0.04f, 0.04f);
+    const glm::vec3 lineClr    = glm::vec3(0.15f, 0.15f, 0.15f);
+    const glm::vec3 redLine    = glm::vec3(0.70f, 0.15f, 0.15f);
+    const glm::vec3 legWood    = glm::vec3(0.20f, 0.10f, 0.05f);
+
+    // 4 Legs
+    float legO = 0.62f;
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C + glm::vec3( legO, -0.3f,  legO)), glm::vec3(0.08f, 0.6f, 0.08f)), legWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C + glm::vec3(-legO, -0.3f,  legO)), glm::vec3(0.08f, 0.6f, 0.08f)), legWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C + glm::vec3( legO, -0.3f, -legO)), glm::vec3(0.08f, 0.6f, 0.08f)), legWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C + glm::vec3(-legO, -0.3f, -legO)), glm::vec3(0.08f, 0.6f, 0.08f)), legWood);
+
+    // Surface
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C), glm::vec3(1.2f, 0.05f, 1.2f)), plywood);
+
+    // Frame (sides)
+    float frH = 0.12f;
+    float frY = 0.035f;
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C + glm::vec3(0, frY, -0.65f)), glm::vec3(1.4f, frH, 0.1f)), frameWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C + glm::vec3(0, frY,  0.65f)), glm::vec3(1.4f, frH, 0.1f)), frameWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C + glm::vec3(-0.65f, frY, 0)), glm::vec3(0.1f, frH, 1.2f)), frameWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C + glm::vec3( 0.65f, frY, 0)), glm::vec3(0.1f, frH, 1.2f)), frameWood);
+
+    // Pocket holes
+    float pOffset = 0.535f;
+    float pocketR = 0.058f;
+    float fY = C.y + 0.026f; // slightly above surface
+    drawDisk(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x +  pOffset, fY, C.z +  pOffset)), glm::vec3(pocketR, 1.0f, pocketR)), pocketClr);
+    drawDisk(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x + -pOffset, fY, C.z +  pOffset)), glm::vec3(pocketR, 1.0f, pocketR)), pocketClr);
+    drawDisk(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x +  pOffset, fY, C.z + -pOffset)), glm::vec3(pocketR, 1.0f, pocketR)), pocketClr);
+    drawDisk(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x + -pOffset, fY, C.z + -pOffset)), glm::vec3(pocketR, 1.0f, pocketR)), pocketClr);
+
+    // Center circles
+    drawDisk(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, fY, C.z)), glm::vec3(0.18f, 1.0f, 0.18f)), lineClr);
+    drawDisk(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, fY+0.0001f, C.z)), glm::vec3(0.17f, 1.0f, 0.17f)), plywood);
+    // Inner small center point
+    drawDisk(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, fY+0.0002f, C.z)), glm::vec3(0.015f, 1.0f, 0.015f)), redLine);
+
+    // Baselines
+    float lineDist = 0.4f;
+    float lineDistIn = 0.35f;
+    float lineLen = 0.8f;
+    float fLine = C.y + 0.0255f;
+    
+    // Outer baselines
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, fLine, C.z + lineDist)), glm::vec3(lineLen, 0.001f, 0.006f)), lineClr);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, fLine, C.z - lineDist)), glm::vec3(lineLen, 0.001f, 0.006f)), lineClr);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x + lineDist, fLine, C.z)), glm::vec3(0.006f, 0.001f, lineLen)), lineClr);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x - lineDist, fLine, C.z)), glm::vec3(0.006f, 0.001f, lineLen)), lineClr);
+    
+    // Inner baselines
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, fLine, C.z + lineDistIn)), glm::vec3(lineLen, 0.001f, 0.002f)), lineClr);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, fLine, C.z - lineDistIn)), glm::vec3(lineLen, 0.001f, 0.002f)), lineClr);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x + lineDistIn, fLine, C.z)), glm::vec3(0.002f, 0.001f, lineLen)), lineClr);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x - lineDistIn, fLine, C.z)), glm::vec3(0.002f, 0.001f, lineLen)), lineClr);
+
+    // End circles (base circles)
+    float baseCircOffset = lineLen / 2.0f;
+    float midDist = (lineDist + lineDistIn) / 2.0f;
+    float circR = 0.038f;
+    float fCirc = C.y + 0.0258f;
+    const glm::vec2 circCoords[8] = {
+        {baseCircOffset, midDist}, {-baseCircOffset, midDist},
+        {baseCircOffset, -midDist}, {-baseCircOffset, -midDist},
+        {midDist, baseCircOffset}, {midDist, -baseCircOffset},
+        {-midDist, baseCircOffset}, {-midDist, -baseCircOffset}
+    };
+    for (int i = 0; i < 8; i++) {
+        drawDisk(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x + circCoords[i].x, fCirc, C.z + circCoords[i].y)), glm::vec3(circR, 1.0f, circR)), redLine);
+        drawDisk(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x + circCoords[i].x, fCirc+0.0001f, C.z + circCoords[i].y)), glm::vec3(circR*0.7f, 1.0f, circR*0.7f)), plywood);
+    }
+    
+    // Diagonal lines
+    glm::mat4 m1 = glm::translate(glm::mat4(1.0f), glm::vec3(C.x + 0.36f, fLine, C.z + 0.36f));
+    m1 = glm::rotate(m1, glm::radians(45.0f), glm::vec3(0, 1, 0));
+    drawCube(VAO, shader, glm::scale(m1, glm::vec3(0.18f, 0.001f, 0.004f)), lineClr);
+
+    glm::mat4 m2 = glm::translate(glm::mat4(1.0f), glm::vec3(C.x - 0.36f, fLine, C.z + 0.36f));
+    m2 = glm::rotate(m2, glm::radians(-45.0f), glm::vec3(0, 1, 0));
+    drawCube(VAO, shader, glm::scale(m2, glm::vec3(0.18f, 0.001f, 0.004f)), lineClr);
+
+    glm::mat4 m3 = glm::translate(glm::mat4(1.0f), glm::vec3(C.x + 0.36f, fLine, C.z - 0.36f));
+    m3 = glm::rotate(m3, glm::radians(-45.0f), glm::vec3(0, 1, 0));
+    drawCube(VAO, shader, glm::scale(m3, glm::vec3(0.18f, 0.001f, 0.004f)), lineClr);
+
+    glm::mat4 m4 = glm::translate(glm::mat4(1.0f), glm::vec3(C.x - 0.36f, fLine, C.z - 0.36f));
+    m4 = glm::rotate(m4, glm::radians(45.0f), glm::vec3(0, 1, 0));
+    drawCube(VAO, shader, glm::scale(m4, glm::vec3(0.18f, 0.001f, 0.004f)), lineClr);
+}
+
+// ==========================================
+// CARROM PIECES
+// 19 men (9 w, 9 b, 1 r) + 1 striker
+// ==========================================
+void drawCarromPieces(Shader& shader) {
+    const glm::vec3 C = glm::vec3(4.0f, 0.627f, 3.0f); // just above surface
+    
+    const float rMan = 0.032f;
+    const float hMan = 0.008f;
+    const float rStr = 0.044f;
+    const float hStr = 0.010f;
+
+    const glm::vec3 wClr = glm::vec3(0.95f, 0.90f, 0.80f);
+    const glm::vec3 bClr = glm::vec3(0.12f, 0.12f, 0.12f);
+    const glm::vec3 rClr = glm::vec3(0.85f, 0.15f, 0.20f);
+    const glm::vec3 sClr = glm::vec3(0.85f, 0.90f, 0.95f); // Ivory/White Striker
+
+    auto drawPiece = [&](float x, float z, float rad, float hScale, glm::vec3 color) {
+        drawSphere(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(x, C.y + hScale, z)), glm::vec3(rad, hScale, rad)), color);
+    };
+
+    // 1. Queen (Center)
+    drawPiece(C.x, C.z, rMan, hMan, rClr);
+
+    // 2. Inner circle (6 pieces: 3 white, 3 black alternating)
+    float d1 = rMan * 2.05f;
+    for (int i = 0; i < 6; ++i) {
+        float angle = glm::radians((float)i * 60.0f);
+        drawPiece(C.x + d1 * cos(angle), C.z + d1 * sin(angle), rMan, hMan, (i % 2 == 0) ? wClr : bClr);
+    }
+
+    // 3. Outer circle (12 pieces: 6 white, 6 black alternating)
+    float d2 = rMan * 3.9f;
+    for (int i = 0; i < 12; ++i) {
+        float angle = glm::radians((float)i * 30.0f + 15.0f);
+        drawPiece(C.x + d2 * cos(angle), C.z + d2 * sin(angle), rMan, hMan, (i % 2 == 0) ? bClr : wClr); 
+    }
+
+    // 4. Striker 
+    float strikerZ = C.z + 0.375f; 
+    drawPiece(C.x, strikerZ, rStr, hStr, sClr);
+
+    // Striker design (colorful rings)
+    drawDisk(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, C.y + 2.0f*hStr + 0.001f, strikerZ)), glm::vec3(rStr*0.55f, 1.0f, rStr*0.55f)), glm::vec3(0.9f, 0.2f, 0.2f));
+    drawDisk(shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, C.y + 2.0f*hStr + 0.0015f, strikerZ)), glm::vec3(rStr*0.35f, 1.0f, rStr*0.35f)), sClr);
 }
 
 // ==========================================
