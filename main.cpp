@@ -1,4 +1,4 @@
-#include <cstddef> 
+#include <cstddef>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
@@ -7,6 +7,8 @@
 #include "shader.h"
 #include <iostream>
 #include <string>
+#include <vector>
+#include <cmath>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -14,7 +16,7 @@
 using namespace std;
 using namespace glm;
 
-// --- Function Prototypes ---
+// ─── Function Prototypes ─────────────────────────────────────────────────────
 void framebuffer_size_callback(GLFWwindow* window, int width, int height);
 void mouse_callback(GLFWwindow* window, double xpos, double ypos);
 void processInput(GLFWwindow* window);
@@ -24,49 +26,47 @@ void drawLightCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 
 void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture);
 void drawAllLights(unsigned int VAO, Shader& lightCubeShader, glm::mat4 projection, glm::mat4 view);
 void setLightUniforms(Shader& shader);
+// New geometry helpers (Surface of Revolution + GL_TRIANGLE_FAN)
+void setupSphereGeometry();
+void setupDiskGeometry();
+void drawSphere(Shader& shader, glm::mat4 model, glm::vec3 color);
+void drawDisk(Shader& shader, glm::mat4 model, glm::vec3 color);
+// Pool table sub-functions
+void drawPoolTable(unsigned int VAO, Shader& shader);
+void drawPoolBalls(Shader& shader);
 
-// --- Settings ---
-const unsigned int SCR_WIDTH = 1200;
+// ─── Settings ────────────────────────────────────────────────────────────────
+const unsigned int SCR_WIDTH  = 1200;
 const unsigned int SCR_HEIGHT = 800;
 
-// --- Camera ---
+// ─── Camera ──────────────────────────────────────────────────────────────────
 glm::vec3 cameraPos   = glm::vec3(0.0f, 4.0f, 8.0f);
 glm::vec3 cameraFront = glm::vec3(0.0f, -0.3f, -1.0f);
 glm::vec3 cameraUp    = glm::vec3(0.0f, 1.0f, 0.0f);
-bool firstMouse = true;
+bool  firstMouse  = true;
 float cameraYaw   = -90.0f;
 float cameraPitch = -20.0f;
-float lastX = SCR_WIDTH / 2.0f;
+float lastX = SCR_WIDTH  / 2.0f;
 float lastY = SCR_HEIGHT / 2.0f;
 float deltaTime = 0.0f;
 float lastFrame = 0.0f;
 
-// =========================================
-// LIGHT SOURCE DEFINITIONS
-// =========================================
-// 3 Spotlights: above Pool Table, Table Tennis, Carrom Board
-// 4 Point Lights: one on each wall (North, South, East, West) at upper-middle
-// No directional light - scene is lit only by physical bulbs
-
-// Spotlight positions (hanging from ceiling at y=5.7, above each board center)
+// ─── Light Sources ───────────────────────────────────────────────────────────
+// 3 Spotlights above game stations; 4 point lights on walls
 const glm::vec3 SPOT_POSITIONS[3] = {
-    glm::vec3(-3.0f, 5.7f,  0.0f),  // Pool Table
-    glm::vec3( 4.0f, 5.7f, -2.0f),  // Table Tennis
-    glm::vec3( 4.0f, 5.7f,  3.0f)   // Carrom Board
+    glm::vec3(-3.0f, 5.7f,  0.0f),   // Pool Table
+    glm::vec3( 4.0f, 5.7f, -2.0f),   // Table Tennis
+    glm::vec3( 4.0f, 5.7f,  3.0f)    // Carrom Board
 };
-
-// Point light positions: mounted on wall surfaces, upper-middle of each wall
-// Room walls: x=±8, z=±6, roof at y=6
-// Bulbs sit at y=5.0 (upper area), slightly inside the wall
 const glm::vec3 POINT_POSITIONS[4] = {
-    glm::vec3( 0.0f, 5.0f, -5.85f),  // North wall (z=-6) facing inward
-    glm::vec3( 0.0f, 5.0f,  5.85f),  // South wall (z=+6) facing inward
-    glm::vec3( 7.85f, 5.0f,  0.0f),  // East wall  (x=+8) facing inward
-    glm::vec3(-7.85f, 5.0f,  0.0f)   // West wall  (x=-8) facing inward
+    glm::vec3( 0.0f,  5.0f, -5.85f), // North wall
+    glm::vec3( 0.0f,  5.0f,  5.85f), // South wall
+    glm::vec3( 7.85f, 5.0f,  0.0f),  // East wall
+    glm::vec3(-7.85f, 5.0f,  0.0f)   // West wall
 };
 
-// Toggle states
-bool spotLightOn[3]  = { true, true, true  };
+// ─── Toggle States ───────────────────────────────────────────────────────────
+bool spotLightOn[3]  = { true, true, true };
 bool pointLightOn[4] = { true, true, true, true };
 bool ambientOn   = true;
 bool diffuseOn   = true;
@@ -74,9 +74,15 @@ bool specularOn  = true;
 bool isSplitView = false;
 bool keyProcessed[1024] = { false };
 
-// Shading & Texture
-bool useGouraud      = false; // Default: Phong (per-fragment)
+// ─── Shading / Texture ───────────────────────────────────────────────────────
+bool useGouraud      = false;
 int  globalTextureMode = 1;   // 0=None, 1=Texture, 2=Blend
+
+// ─── Sphere / Disk Geometry (Surface of Revolution) ─────────────────────────
+unsigned int sphereVAO, sphereVBO, sphereEBO;
+int          sphereIndexCount = 0;
+unsigned int diskVAO, diskVBO;
+int          diskVertexCount  = 0;
 
 // ==========================================
 // 1. PHONG VERTEX SHADER
@@ -105,11 +111,8 @@ const std::string vertexShaderPhongSource = R"(
 
 // ==========================================
 // 2. PHONG FRAGMENT SHADER (Per-Fragment)
-// Implements full Phong model:
-//   I = I_ambient + I_diffuse + I_specular
-//   I_a = k_a * L_a
-//   I_d = k_d * L_d * max(L . N, 0)
-//   I_s = k_s * L_s * max(R . V, 0)^n
+// I = I_ambient + I_diffuse + I_specular
+// I_a = k_a*L_a, I_d = k_d*L_d*max(L.N,0), I_s = k_s*L_s*max(R.V,0)^n
 // ==========================================
 const std::string fragmentShaderPhongSource = R"(
     #version 330 core
@@ -148,7 +151,7 @@ const std::string fragmentShaderPhongSource = R"(
     uniform vec3 viewPos;
     uniform vec3 objectColor;
     uniform sampler2D diffuseMap;
-    uniform int  textureMode;  // 0=None, 1=Texture, 2=Blend
+    uniform int  textureMode;
 
     uniform PointLight pointLights[NR_POINT_LIGHTS];
     uniform SpotLight  spotLights[NR_SPOT_LIGHTS];
@@ -158,7 +161,6 @@ const std::string fragmentShaderPhongSource = R"(
     uniform bool enableDiffuse;
     uniform bool enableSpecular;
 
-    // --- Point Light Calculation ---
     vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
         vec3  lightDir   = normalize(light.position - fragPos);
         float diff       = max(dot(normal, lightDir), 0.0);
@@ -166,27 +168,23 @@ const std::string fragmentShaderPhongSource = R"(
         float spec       = pow(max(dot(viewDir, reflectDir), 0.0), 32.0);
         float dist       = length(light.position - fragPos);
         float atten      = 1.0 / (light.constant + light.linear * dist + light.quadratic * dist * dist);
-
-        vec3 ambient  = enableAmbient  ? light.ambient  * atten       : vec3(0.0);
+        vec3 ambient  = enableAmbient  ? light.ambient  * atten        : vec3(0.0);
         vec3 diffuse  = enableDiffuse  ? light.diffuse  * diff * atten : vec3(0.0);
         vec3 specular = enableSpecular ? light.specular * spec * atten : vec3(0.0);
         return ambient + diffuse + specular;
     }
 
-    // --- Spotlight Calculation (Phong + soft edge) ---
     vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
-        vec3  lightDir = normalize(light.position - fragPos);
-        float theta    = dot(lightDir, normalize(-light.direction));
-        float epsilon  = light.cutOff - light.outerCutOff;
+        vec3  lightDir  = normalize(light.position - fragPos);
+        float theta     = dot(lightDir, normalize(-light.direction));
+        float epsilon   = light.cutOff - light.outerCutOff;
         float intensity = clamp((theta - light.outerCutOff) / epsilon, 0.0, 1.0);
-
         float diff       = max(dot(normal, lightDir), 0.0);
         vec3  reflectDir = reflect(-lightDir, normal);
         float spec       = pow(max(dot(viewDir, reflectDir), 0.0), 64.0);
         float dist       = length(light.position - fragPos);
         float atten      = 1.0 / (light.constant + light.linear * dist + light.quadratic * dist * dist);
-
-        vec3 ambient  = enableAmbient  ? light.ambient  * atten                  : vec3(0.0);
+        vec3 ambient  = enableAmbient  ? light.ambient  * atten                   : vec3(0.0);
         vec3 diffuse  = enableDiffuse  ? light.diffuse  * diff * atten * intensity : vec3(0.0);
         vec3 specular = enableSpecular ? light.specular * spec * atten * intensity : vec3(0.0);
         return ambient + diffuse + specular;
@@ -195,28 +193,21 @@ const std::string fragmentShaderPhongSource = R"(
     void main() {
         vec3 norm    = normalize(Normal);
         vec3 viewDir = normalize(viewPos - FragPos);
-
-        // Small global ambient fill so darkened areas aren't pitch black
-        vec3 result = vec3(0.03);
-
+        vec3 result  = vec3(0.03);
         for (int i = 0; i < NR_POINT_LIGHTS; i++)
             if (enablePoint[i]) result += CalcPointLight(pointLights[i], norm, FragPos, viewDir);
         for (int i = 0; i < NR_SPOT_LIGHTS; i++)
             if (enableSpot[i])  result += CalcSpotLight(spotLights[i],  norm, FragPos, viewDir);
-
         vec4 texColor;
         if      (textureMode == 0) texColor = vec4(objectColor, 1.0);
         else if (textureMode == 1) texColor = texture(diffuseMap, TexCoords);
         else                       texColor = mix(vec4(objectColor, 1.0), texture(diffuseMap, TexCoords), 0.5);
-
         FragColor = vec4(result * texColor.rgb, texColor.a);
     }
 )";
 
 // ==========================================
 // 3. GOURAUD VERTEX SHADER (Per-Vertex)
-// Lighting computed at each vertex; color
-// interpolated across the fragment.
 // ==========================================
 const std::string vertexShaderGouraudSource = R"(
     #version 330 core
@@ -239,7 +230,6 @@ const std::string vertexShaderGouraudSource = R"(
         vec3  diffuse;
         vec3  specular;
     };
-
     struct SpotLight {
         vec3  position;
         vec3  direction;
@@ -257,7 +247,6 @@ const std::string vertexShaderGouraudSource = R"(
     uniform mat4 view;
     uniform mat4 projection;
     uniform vec3 viewPos;
-
     uniform PointLight pointLights[NR_POINT_LIGHTS];
     uniform SpotLight  spotLights[NR_SPOT_LIGHTS];
     uniform bool enablePoint[NR_POINT_LIGHTS];
@@ -274,11 +263,10 @@ const std::string vertexShaderGouraudSource = R"(
         float dist       = length(light.position - fragPos);
         float atten      = 1.0 / (light.constant + light.linear * dist + light.quadratic * dist * dist);
         vec3 ambient  = enableAmbient  ? light.ambient  * atten        : vec3(0.0);
-        vec3 diffuse  = enableDiffuse  ? light.diffuse  * diff * atten  : vec3(0.0);
-        vec3 specular = enableSpecular ? light.specular * spec * atten  : vec3(0.0);
+        vec3 diffuse  = enableDiffuse  ? light.diffuse  * diff * atten : vec3(0.0);
+        vec3 specular = enableSpecular ? light.specular * spec * atten : vec3(0.0);
         return ambient + diffuse + specular;
     }
-
     vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir) {
         vec3  lightDir  = normalize(light.position - fragPos);
         float theta     = dot(lightDir, normalize(-light.direction));
@@ -290,8 +278,8 @@ const std::string vertexShaderGouraudSource = R"(
         float dist       = length(light.position - fragPos);
         float atten      = 1.0 / (light.constant + light.linear * dist + light.quadratic * dist * dist);
         vec3 ambient  = enableAmbient  ? light.ambient  * atten                   : vec3(0.0);
-        vec3 diffuse  = enableDiffuse  ? light.diffuse  * diff * atten * intensity  : vec3(0.0);
-        vec3 specular = enableSpecular ? light.specular * spec * atten * intensity  : vec3(0.0);
+        vec3 diffuse  = enableDiffuse  ? light.diffuse  * diff * atten * intensity : vec3(0.0);
+        vec3 specular = enableSpecular ? light.specular * spec * atten * intensity : vec3(0.0);
         return ambient + diffuse + specular;
     }
 
@@ -300,13 +288,11 @@ const std::string vertexShaderGouraudSource = R"(
         vec3 Normal  = normalize(mat3(transpose(inverse(model))) * aNormal);
         TexCoords    = aTexCoords;
         vec3 viewDir = normalize(viewPos - FragPos);
-
-        vec3 result = vec3(0.03); // base ambient fill
+        vec3 result  = vec3(0.03);
         for (int i = 0; i < NR_POINT_LIGHTS; i++)
             if (enablePoint[i]) result += CalcPointLight(pointLights[i], Normal, FragPos, viewDir);
         for (int i = 0; i < NR_SPOT_LIGHTS; i++)
             if (enableSpot[i])  result += CalcSpotLight(spotLights[i],  Normal, FragPos, viewDir);
-
         LightingColor = result;
         gl_Position   = projection * view * vec4(FragPos, 1.0);
     }
@@ -318,26 +304,22 @@ const std::string vertexShaderGouraudSource = R"(
 const std::string fragmentShaderGouraudSource = R"(
     #version 330 core
     out vec4 FragColor;
-
     in vec3 LightingColor;
     in vec2 TexCoords;
-
     uniform vec3 objectColor;
     uniform sampler2D diffuseMap;
     uniform int  textureMode;
-
     void main() {
         vec4 texColor;
         if      (textureMode == 0) texColor = vec4(objectColor, 1.0);
         else if (textureMode == 1) texColor = texture(diffuseMap, TexCoords);
         else                       texColor = mix(vec4(objectColor, 1.0), texture(diffuseMap, TexCoords), 0.5);
-
         FragColor = vec4(LightingColor * texColor.rgb, texColor.a);
     }
 )";
 
 // ==========================================
-// 5. LIGHT CUBE SHADER (Unlit emissive bulb)
+// 5. LIGHT CUBE SHADER (unlit emissive)
 // ==========================================
 const std::string vertexShaderLightCubeSource = R"(
     #version 330 core
@@ -349,15 +331,11 @@ const std::string vertexShaderLightCubeSource = R"(
         gl_Position = projection * view * model * vec4(aPos, 1.0);
     }
 )";
-
 const std::string fragmentShaderLightCubeSource = R"(
     #version 330 core
     out vec4 FragColor;
     uniform vec3 objectColor;
-    void main() {
-        // Unlit: no lighting calculation, appears fully emissive
-        FragColor = vec4(objectColor, 1.0);
-    }
+    void main() { FragColor = vec4(objectColor, 1.0); }
 )";
 
 // ==========================================
@@ -365,7 +343,6 @@ const std::string fragmentShaderLightCubeSource = R"(
 // ==========================================
 int main()
 {
-    // --- GLFW Init & Window ---
     glfwInit();
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -378,17 +355,14 @@ int main()
     glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     gladLoadGLLoader((GLADloadproc)glfwGetProcAddress);
 
-    // --- Compile Shaders ---
-    Shader phongShader(vertexShaderPhongSource,    fragmentShaderPhongSource);
+    Shader phongShader(vertexShaderPhongSource,     fragmentShaderPhongSource);
     Shader gouraudShader(vertexShaderGouraudSource, fragmentShaderGouraudSource);
     Shader lightCubeShader(vertexShaderLightCubeSource, fragmentShaderLightCubeSource);
 
-    // --- Textures ---
     unsigned int poolStickerTexture = loadTexture("resources/Designer.png");
 
-    // --- Cube Vertex Data: positions, normals, texCoords ---
+    // Cube vertex data: positions, normals, tex coords
     float vertices[] = {
-        // positions          // normals           // tex coords
         -0.5f,-0.5f,-0.5f,  0.0f, 0.0f,-1.0f,  0.0f,0.0f,
          0.5f,-0.5f,-0.5f,  0.0f, 0.0f,-1.0f,  1.0f,0.0f,
          0.5f, 0.5f,-0.5f,  0.0f, 0.0f,-1.0f,  1.0f,1.0f,
@@ -432,31 +406,28 @@ int main()
         -0.5f, 0.5f,-0.5f,  0.0f, 1.0f, 0.0f,  0.0f,1.0f
     };
 
-    // --- VAO / VBO ---
     unsigned int VBO, VAO;
     glGenVertexArrays(1, &VAO);
     glGenBuffers(1, &VBO);
     glBindVertexArray(VAO);
     glBindBuffer(GL_ARRAY_BUFFER, VBO);
     glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-
-    // position
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
-    // normal
     glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
     glEnableVertexAttribArray(1);
-    // texcoord
     glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
     glEnableVertexAttribArray(2);
+
+    // Pool ball spheres (Surface of Revolution) + pocket disks (GL_TRIANGLE_FAN)
+    setupSphereGeometry();
+    setupDiskGeometry();
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // ==========================================
-    // RENDER LOOP
-    // ==========================================
+    // ── Render Loop ───────────────────────────────────────────────────────────
     while (!glfwWindowShouldClose(window))
     {
         float currentFrame = static_cast<float>(glfwGetTime());
@@ -464,7 +435,6 @@ int main()
         lastFrame = currentFrame;
 
         processInput(window);
-
         glClearColor(0.04f, 0.04f, 0.05f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -490,28 +460,24 @@ int main()
             glm::mat4 proj = glm::perspective(glm::radians(45.0f), ar, 0.1f, 100.0f);
             glm::mat4 view;
 
-            // Top-down
             glViewport(0, displayH / 2, displayW / 2, displayH / 2);
             view = glm::lookAt(glm::vec3(0.0f, 15.0f, 0.1f), glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             activeShader.use(); activeShader.setMat4("projection", proj); activeShader.setMat4("view", view);
             drawGameHubScene(VAO, activeShader, poolStickerTexture);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
-            // Right side
             glViewport(displayW / 2, displayH / 2, displayW / 2, displayH / 2);
             view = glm::lookAt(glm::vec3(14.0f, 3.0f, 0.0f), glm::vec3(0.0f, 3.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             activeShader.use(); activeShader.setMat4("view", view);
             drawGameHubScene(VAO, activeShader, poolStickerTexture);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
-            // Front
             glViewport(0, 0, displayW / 2, displayH / 2);
             view = glm::lookAt(glm::vec3(0.0f, 2.0f, 14.0f), glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             activeShader.use(); activeShader.setMat4("view", view);
             drawGameHubScene(VAO, activeShader, poolStickerTexture);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
-            // Free camera
             glViewport(displayW / 2, 0, displayW / 2, displayH / 2);
             view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
             activeShader.use(); activeShader.setMat4("view", view);
@@ -525,6 +491,11 @@ int main()
 
     glDeleteVertexArrays(1, &VAO);
     glDeleteBuffers(1, &VBO);
+    glDeleteVertexArrays(1, &sphereVAO);
+    glDeleteBuffers(1, &sphereVBO);
+    glDeleteBuffers(1, &sphereEBO);
+    glDeleteVertexArrays(1, &diskVAO);
+    glDeleteBuffers(1, &diskVBO);
     glfwTerminate();
     return 0;
 }
@@ -537,17 +508,14 @@ void setLightUniforms(Shader& shader) {
     shader.setBool("enableDiffuse",  diffuseOn);
     shader.setBool("enableSpecular", specularOn);
 
-    // --- 3 Spotlights above each board ---
-    // Warm bulb color (slightly yellow-white like an incandescent)
     glm::vec3 bulbDiffuse  = glm::vec3(1.0f, 0.92f, 0.75f);
     glm::vec3 bulbSpecular = glm::vec3(1.0f, 0.95f, 0.85f);
-
     for (int i = 0; i < 3; i++) {
         std::string n = "spotLights[" + std::to_string(i) + "].";
         shader.setBool("enableSpot[" + std::to_string(i) + "]", spotLightOn[i]);
         shader.setVec3(n + "position",   SPOT_POSITIONS[i]);
-        shader.setVec3(n + "direction",  glm::vec3(0.0f, -1.0f, 0.0f)); // aimed straight down
-        shader.setVec3(n + "ambient",    glm::vec3(0.0f));               // spotlights have no ambient
+        shader.setVec3(n + "direction",  glm::vec3(0.0f, -1.0f, 0.0f));
+        shader.setVec3(n + "ambient",    glm::vec3(0.0f));
         shader.setVec3(n + "diffuse",    bulbDiffuse);
         shader.setVec3(n + "specular",   bulbSpecular);
         shader.setFloat(n + "constant",  1.0f);
@@ -557,16 +525,13 @@ void setLightUniforms(Shader& shader) {
         shader.setFloat(n + "outerCutOff", glm::cos(glm::radians(25.0f)));
     }
 
-    // --- 4 Wall Point Lights ---
-    // Cool-white wall lights (like fluorescent brackets)
     glm::vec3 wallDiffuse  = glm::vec3(0.75f, 0.80f, 0.85f);
     glm::vec3 wallSpecular = glm::vec3(0.50f, 0.55f, 0.60f);
-
     for (int i = 0; i < 4; i++) {
         std::string n = "pointLights[" + std::to_string(i) + "].";
         shader.setBool("enablePoint[" + std::to_string(i) + "]", pointLightOn[i]);
         shader.setVec3(n + "position",  POINT_POSITIONS[i]);
-        shader.setVec3(n + "ambient",   glm::vec3(0.05f)); // very slight ambient glow
+        shader.setVec3(n + "ambient",   glm::vec3(0.05f));
         shader.setVec3(n + "diffuse",   wallDiffuse);
         shader.setVec3(n + "specular",  wallSpecular);
         shader.setFloat(n + "constant",  1.0f);
@@ -589,7 +554,6 @@ unsigned int loadTexture(char const* path) {
         if      (nrComponents == 1) format = GL_RED;
         else if (nrComponents == 3) format = GL_RGB;
         else if (nrComponents == 4) format = GL_RGBA;
-
         glBindTexture(GL_TEXTURE_2D, textureID);
         glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
         glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
@@ -607,7 +571,7 @@ unsigned int loadTexture(char const* path) {
 }
 
 // ==========================================
-// DRAW HELPERS
+// DRAW HELPERS – Cube and Light Cube
 // ==========================================
 void drawCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color, unsigned int textureID) {
     shader.setMat4("model", model);
@@ -632,80 +596,340 @@ void drawLightCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 
 }
 
 // ==========================================
+// SPHERE SETUP – Surface of Revolution (Requirements §2)
+// x = r·cos(θ),  z = −r·sin(θ),  y = r·sin(φ)
+// Unit sphere (radius=1); scale via model matrix when drawing.
+// ==========================================
+void setupSphereGeometry() {
+    const float PI      = glm::pi<float>();
+    const int   SECTORS = 20;  // longitude divisions
+    const int   STACKS  = 14;  // latitude  divisions
+
+    std::vector<float>        verts;
+    std::vector<unsigned int> inds;
+    verts.reserve((SECTORS + 1) * (STACKS + 1) * 8);
+    inds.reserve(SECTORS * STACKS * 6);
+
+    for (int i = 0; i <= STACKS; ++i) {
+        float phi = PI / 2.0f - i * PI / (float)STACKS; // +π/2 → −π/2
+        float y   = sinf(phi);
+        float r   = cosf(phi);
+        for (int j = 0; j <= SECTORS; ++j) {
+            float theta = j * 2.0f * PI / (float)SECTORS;
+            // Surface of Revolution formula (Requirements §2):
+            float x = r * cosf(theta);
+            float z = -r * sinf(theta);
+            float s = (float)j / (float)SECTORS;
+            float t = (float)i / (float)STACKS;
+            // pos(x,y,z)  normal=pos for unit sphere  uv(s,t)
+            verts.insert(verts.end(), { x, y, z,  x, y, z,  s, t });
+        }
+    }
+    for (int i = 0; i < STACKS; ++i) {
+        for (int j = 0; j < SECTORS; ++j) {
+            unsigned int p1 = i * (SECTORS + 1) + j;
+            unsigned int p2 = p1 + (SECTORS + 1);
+            inds.insert(inds.end(), { p1, p2, p1+1,  p1+1, p2, p2+1 });
+        }
+    }
+    sphereIndexCount = (int)inds.size();
+
+    glGenVertexArrays(1, &sphereVAO);
+    glGenBuffers(1, &sphereVBO);
+    glGenBuffers(1, &sphereEBO);
+    glBindVertexArray(sphereVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, sphereVBO);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(verts.size() * sizeof(float)), verts.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, sphereEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(inds.size() * sizeof(unsigned int)), inds.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glBindVertexArray(0);
+}
+
+// ==========================================
+// DISK SETUP – GL_TRIANGLE_FAN (Requirements §1)
+// Unit disk in the XZ plane (y=0, normal=+Y).
+// Scale via model matrix: vec3(radius, 1, radius) for a horizontal disk.
+// ==========================================
+void setupDiskGeometry() {
+    const float PI       = glm::pi<float>();
+    const int   SEGMENTS = 32;
+
+    std::vector<float> verts;
+    verts.reserve((SEGMENTS + 2) * 8);
+
+    // Fan centre vertex
+    verts.insert(verts.end(), { 0.0f, 0.0f, 0.0f,  0.0f, 1.0f, 0.0f,  0.5f, 0.5f });
+    for (int i = 0; i <= SEGMENTS; ++i) {
+        float theta = i * 2.0f * PI / (float)SEGMENTS;
+        float x = cosf(theta), z = sinf(theta);
+        verts.insert(verts.end(), { x, 0.0f, z,  0.0f, 1.0f, 0.0f,
+                                    0.5f + 0.5f * x, 0.5f + 0.5f * z });
+    }
+    diskVertexCount = SEGMENTS + 2;
+
+    glGenVertexArrays(1, &diskVAO);
+    glGenBuffers(1, &diskVBO);
+    glBindVertexArray(diskVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, diskVBO);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(verts.size() * sizeof(float)), verts.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glBindVertexArray(0);
+}
+
+void drawSphere(Shader& shader, glm::mat4 model, glm::vec3 color) {
+    shader.setMat4("model", model);
+    shader.setVec3("objectColor", color);
+    shader.setInt("textureMode", 0);
+    glBindVertexArray(sphereVAO);
+    glDrawElements(GL_TRIANGLES, sphereIndexCount, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+}
+
+// model matrix must scale XZ by radius; Y scale =1 keeps disk flat
+void drawDisk(Shader& shader, glm::mat4 model, glm::vec3 color) {
+    shader.setMat4("model", model);
+    shader.setVec3("objectColor", color);
+    shader.setInt("textureMode", 0);
+    glBindVertexArray(diskVAO);
+    glDrawArrays(GL_TRIANGLE_FAN, 0, diskVertexCount);
+    glBindVertexArray(0);
+}
+
+// ==========================================
 // DRAW ALL LIGHT FIXTURES
-// Spotlights: bulb + thin cord from ceiling
-// Wall lights: flat bracket flush against wall
 // ==========================================
 void drawAllLights(unsigned int VAO, Shader& lightCubeShader, glm::mat4 projection, glm::mat4 view) {
     lightCubeShader.use();
     lightCubeShader.setMat4("projection", projection);
     lightCubeShader.setMat4("view", view);
 
-    glm::vec3 bulbColor   = glm::vec3(1.0f, 0.95f, 0.75f); // warm incandescent
-    glm::vec3 cordColor   = glm::vec3(0.15f, 0.12f, 0.10f); // dark cord
-    glm::vec3 bracketColor = glm::vec3(0.8f, 0.8f, 0.8f);  // metal bracket
+    glm::vec3 bulbColor    = glm::vec3(1.0f, 0.95f, 0.75f);
+    glm::vec3 cordColor    = glm::vec3(0.15f, 0.12f, 0.10f);
+    glm::vec3 bracketColor = glm::vec3(0.8f,  0.8f,  0.8f);
 
-    // --- 3 SPOTLIGHTS: hanging from ceiling ---
     for (int i = 0; i < 3; i++) {
         if (!spotLightOn[i]) continue;
-
         glm::vec3 pos = SPOT_POSITIONS[i];
-
-        // Cord: thin vertical line from ceiling (y=6.0) to bulb (y=pos.y+0.12)
-        float cordLen  = 6.0f - (pos.y + 0.13f);
-        float cordMid  = 6.0f - cordLen / 2.0f;
-        glm::mat4 cordModel = glm::scale(
-            glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, cordMid, pos.z)),
-            glm::vec3(0.025f, cordLen, 0.025f)
-        );
-        drawLightCube(VAO, lightCubeShader, cordModel, cordColor);
-
-        // Bulb socket: small dark cube just above the bulb
-        glm::mat4 socketModel = glm::scale(
-            glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, pos.y + 0.13f, pos.z)),
-            glm::vec3(0.12f, 0.10f, 0.12f)
-        );
-        drawLightCube(VAO, lightCubeShader, socketModel, glm::vec3(0.2f, 0.2f, 0.2f));
-
-        // Bulb: bright glowing cube
-        glm::mat4 bulbModel = glm::scale(
-            glm::translate(glm::mat4(1.0f), pos),
-            glm::vec3(0.18f, 0.18f, 0.18f)
-        );
-        drawLightCube(VAO, lightCubeShader, bulbModel, bulbColor);
+        float cordLen = 6.0f - (pos.y + 0.13f);
+        float cordMid = 6.0f - cordLen / 2.0f;
+        drawLightCube(VAO, lightCubeShader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, cordMid, pos.z)),
+                       glm::vec3(0.025f, cordLen, 0.025f)), cordColor);
+        drawLightCube(VAO, lightCubeShader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, pos.y+0.13f, pos.z)),
+                       glm::vec3(0.12f, 0.10f, 0.12f)), glm::vec3(0.2f));
+        drawLightCube(VAO, lightCubeShader,
+            glm::scale(glm::translate(glm::mat4(1.0f), pos), glm::vec3(0.18f)), bulbColor);
     }
 
-    // --- 4 WALL POINT LIGHTS: bracket mounted flush on wall ---
     for (int i = 0; i < 4; i++) {
         if (!pointLightOn[i]) continue;
-
         glm::vec3 pos = POINT_POSITIONS[i];
+        glm::mat4 backM, bulbM;
+        if      (i == 0) { backM = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x,pos.y,-5.97f)), glm::vec3(0.35f,0.35f,0.05f)); bulbM = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x,pos.y,-5.78f)), glm::vec3(0.15f,0.15f,0.20f)); }
+        else if (i == 1) { backM = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x,pos.y, 5.97f)), glm::vec3(0.35f,0.35f,0.05f)); bulbM = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x,pos.y, 5.78f)), glm::vec3(0.15f,0.15f,0.20f)); }
+        else if (i == 2) { backM = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 7.97f,pos.y,pos.z)), glm::vec3(0.05f,0.35f,0.35f)); bulbM = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 7.78f,pos.y,pos.z)), glm::vec3(0.20f,0.15f,0.15f)); }
+        else              { backM = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-7.97f,pos.y,pos.z)), glm::vec3(0.05f,0.35f,0.35f)); bulbM = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-7.78f,pos.y,pos.z)), glm::vec3(0.20f,0.15f,0.15f)); }
+        drawLightCube(VAO, lightCubeShader, backM, bracketColor);
+        drawLightCube(VAO, lightCubeShader, bulbM, bulbColor);
+    }
+}
 
-        // Bracket backing (flat, flush against wall)
-        // We need to orient brackets depending on which wall
-        glm::mat4 backingModel;
-        glm::mat4 bulbModel;
+// ==========================================
+// POOL TABLE (Billiards) – Realistic Version
+// Centre: world (−3, 0.8, 0)
+// Playing surface: 3.0 (x-width) × 4.5 (z-length)
+// 6 pockets: 4 corner + 2 side (dark disks on baize)
+// ==========================================
+void drawPoolTable(unsigned int VAO, Shader& shader) {
+    const glm::vec3 C = glm::vec3(-3.0f, 0.8f, 0.0f);  // table centre
 
-        if (i == 0) {
-            // North wall: z = -6, bracket faces +z
-            backingModel = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, pos.y, -5.97f)), glm::vec3(0.35f, 0.35f, 0.05f));
-            bulbModel    = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, pos.y, -5.78f)), glm::vec3(0.15f, 0.15f, 0.20f));
-        } else if (i == 1) {
-            // South wall: z = +6, bracket faces -z
-            backingModel = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, pos.y, 5.97f)), glm::vec3(0.35f, 0.35f, 0.05f));
-            bulbModel    = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, pos.y, 5.78f)), glm::vec3(0.15f, 0.15f, 0.20f));
-        } else if (i == 2) {
-            // East wall: x = +8, bracket faces -x
-            backingModel = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(7.97f, pos.y, pos.z)), glm::vec3(0.05f, 0.35f, 0.35f));
-            bulbModel    = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(7.78f, pos.y, pos.z)), glm::vec3(0.20f, 0.15f, 0.15f));
-        } else {
-            // West wall: x = -8, bracket faces +x
-            backingModel = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-7.97f, pos.y, pos.z)), glm::vec3(0.05f, 0.35f, 0.35f));
-            bulbModel    = glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-7.78f, pos.y, pos.z)), glm::vec3(0.20f, 0.15f, 0.15f));
+    const glm::vec3 mahogany  = glm::vec3(0.24f, 0.10f, 0.03f);
+    const glm::vec3 feltPlay  = glm::vec3(0.05f, 0.42f, 0.15f);
+    const glm::vec3 feltCush  = glm::vec3(0.07f, 0.35f, 0.10f);
+    const glm::vec3 pocketClr = glm::vec3(0.03f, 0.03f, 0.03f);
+    const glm::vec3 leatherCl = glm::vec3(0.08f, 0.04f, 0.01f);
+    const glm::vec3 spotClr   = glm::vec3(0.72f, 0.72f, 0.62f);
+    const glm::vec3 lineClr   = glm::vec3(0.48f, 0.48f, 0.38f);
+    const glm::vec3 cueWood   = glm::vec3(0.80f, 0.62f, 0.38f);
+    const glm::vec3 cueTip    = glm::vec3(0.22f, 0.42f, 0.72f);
+
+    // ── Outer slate frame / support ──────────────────────────────────────────
+    drawCube(VAO, shader,
+        glm::scale(glm::translate(glm::mat4(1.0f), C + glm::vec3(0,-0.08f,0)),
+        glm::vec3(3.55f, 0.12f, 5.1f)), mahogany);
+
+    // ── Four turned legs + foot pads ─────────────────────────────────────────
+    const glm::vec3 LO[4] = {
+        {-1.42f,-0.55f,-2.1f}, {1.42f,-0.55f,-2.1f},
+        {-1.42f,-0.55f, 2.1f}, {1.42f,-0.55f, 2.1f}
+    };
+    for (const auto& lo : LO) {
+        drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+lo),             glm::vec3(0.22f,1.0f,0.22f)), mahogany);
+        drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+lo+glm::vec3(0,-0.52f,0)), glm::vec3(0.30f,0.06f,0.30f)), mahogany);
+    }
+
+    // ── Side apron panels (below rail, between legs) ──────────────────────────
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(-1.58f,-0.13f, 0)), glm::vec3(0.10f,0.55f,4.35f)), mahogany);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 1.58f,-0.13f, 0)), glm::vec3(0.10f,0.55f,4.35f)), mahogany);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(0,-0.13f,-2.38f)), glm::vec3(3.15f,0.55f,0.10f)), mahogany);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(0,-0.13f, 2.38f)), glm::vec3(3.15f,0.55f,0.10f)), mahogany);
+
+    // ── Playing baize (felt surface) ─────────────────────────────────────────
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C), glm::vec3(3.0f,0.08f,4.5f)), feltPlay);
+
+    // ── Cushion rails ────────────────────────────────────────────────────────
+    // Long rails (x=±1.53): split at side pocket (gap at |z|<0.14)
+    //  upper half centre z=-1.03, len 1.79;  lower half centre z=+1.03, len 1.79
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(-1.53f,0.10f,-1.03f)), glm::vec3(0.17f,0.22f,1.79f)), feltCush);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(-1.53f,0.10f, 1.03f)), glm::vec3(0.17f,0.22f,1.79f)), feltCush);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 1.53f,0.10f,-1.03f)), glm::vec3(0.17f,0.22f,1.79f)), feltCush);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 1.53f,0.10f, 1.03f)), glm::vec3(0.17f,0.22f,1.79f)), feltCush);
+
+    // Short rails (z=±2.21): single continuous piece, pocket gaps at corners
+    //  width 2.64 centred at x=0 (leaves ≈0.18 at each corner for pocket)
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(0,0.10f,-2.21f)), glm::vec3(2.64f,0.22f,0.17f)), feltCush);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(0,0.10f, 2.21f)), glm::vec3(2.64f,0.22f,0.17f)), feltCush);
+
+    // ── Outer wooden top-cap rail ─────────────────────────────────────────────
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(-1.67f,0.153f, 0)),    glm::vec3(0.25f,0.07f,4.78f)), mahogany);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3( 1.67f,0.153f, 0)),    glm::vec3(0.25f,0.07f,4.78f)), mahogany);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(0, 0.153f,-2.38f)),    glm::vec3(3.26f,0.07f,0.26f)), mahogany);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), C+glm::vec3(0, 0.153f, 2.38f)),    glm::vec3(3.26f,0.07f,0.26f)), mahogany);
+
+    // ── Pocket leather lining boxes ───────────────────────────────────────────
+    // 4 corner pockets + 2 side pockets
+    struct PXZ { float x, z; };
+    const PXZ corners[4] = { {-1.47f,-2.13f},{1.47f,-2.13f},{-1.47f,2.13f},{1.47f,2.13f} };
+    const PXZ sides[2]   = { {-1.55f, 0.0f}, {1.55f, 0.0f} };
+
+    for (const auto& p : corners)
+        drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f),
+            C + glm::vec3(p.x, 0.01f, p.z)), glm::vec3(0.28f,0.10f,0.28f)), leatherCl);
+    for (const auto& p : sides)
+        drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f),
+            C + glm::vec3(p.x, 0.01f, p.z)), glm::vec3(0.16f,0.10f,0.30f)), leatherCl);
+
+    // ── Pocket holes – dark disks rendered via GL_TRIANGLE_FAN ───────────────
+    // Disk is in XZ plane, normal=+Y. Scale (r, 1, r) = horizontal disk of radius r.
+    const float feltTop = C.y + 0.042f;   // just above baize surface
+    const float pocketR = 0.127f;
+
+    for (const auto& p : corners)
+        drawDisk(shader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x+p.x, feltTop, C.z+p.z)),
+                       glm::vec3(pocketR, 1.0f, pocketR)), pocketClr);
+    for (const auto& p : sides)
+        drawDisk(shader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x+p.x, feltTop, C.z+p.z)),
+                       glm::vec3(pocketR, 1.0f, pocketR)), pocketClr);
+
+    // ── Sight spots on baize (head, centre, foot) ─────────────────────────────
+    const float spotY = feltTop + 0.001f;
+    auto drawSpot = [&](float wz) {
+        drawDisk(shader,
+            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, spotY, wz)),
+                       glm::vec3(0.024f, 1.0f, 0.024f)), spotClr);
+    };
+    drawSpot(-1.125f);  // head spot  (1/4 from head end)
+    drawSpot( 0.0f);    // centre spot
+    drawSpot( 1.125f);  // foot spot  (1/4 from foot end)
+
+    // Headstring: thin line across felt at head spot
+    drawCube(VAO, shader,
+        glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(C.x, spotY+0.001f, -1.125f)),
+        glm::vec3(2.9f, 0.004f, 0.005f)), lineClr);
+
+    // ── Cue stick resting on long rail ────────────────────────────────────────
+    glm::mat4 cueM = glm::translate(glm::mat4(1.0f), C + glm::vec3(0.92f, 0.20f, 0.5f));
+    cueM = glm::rotate(cueM, glm::radians(12.0f),  glm::vec3(1.0f, 0.0f, 0.0f));
+    cueM = glm::rotate(cueM, glm::radians(-10.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    drawCube(VAO, shader, glm::scale(cueM, glm::vec3(0.035f, 0.035f, 2.9f)), cueWood);
+    // Chalk-blue tip
+    glm::mat4 tipM = glm::translate(glm::mat4(1.0f), C + glm::vec3(0.75f, 0.24f, -0.85f));
+    tipM = glm::rotate(tipM, glm::radians(-10.0f), glm::vec3(0.0f,1.0f,0.0f));
+    drawCube(VAO, shader, glm::scale(tipM, glm::vec3(0.042f,0.042f,0.08f)), cueTip);
+}
+
+// ==========================================
+// POOL BALLS – 16 Spheres (Surface of Revolution)
+// Cue ball at head spot (z=−1.125)
+// 15 object balls in standard 8-ball triangle rack at foot spot (z=+1.125)
+// ==========================================
+void drawPoolBalls(Shader& shader) {
+    const float ballR = 0.07f;
+    const float ballY = 0.8f + 0.04f + ballR;  // felt top + radius ≈ 0.91
+    const float CX    = -3.0f;                  // table x-centre
+
+    // Ball colours [0]=cue ball  [1..15]=object balls
+    // Solids 1-7: rich pigment; 8=black; stripes 9-15: lighter/brighter hue
+    const glm::vec3 BC[16] = {
+        {0.96f,0.96f,0.94f},  // 0  cue ball  – near white
+        {0.95f,0.85f,0.05f},  // 1  Yellow  solid
+        {0.10f,0.25f,0.80f},  // 2  Blue    solid
+        {0.88f,0.10f,0.07f},  // 3  Red     solid
+        {0.50f,0.07f,0.55f},  // 4  Purple  solid
+        {1.00f,0.42f,0.00f},  // 5  Orange  solid
+        {0.10f,0.50f,0.15f},  // 6  Green   solid
+        {0.52f,0.05f,0.05f},  // 7  Maroon  solid
+        {0.07f,0.07f,0.07f},  // 8  Black
+        {1.00f,0.95f,0.20f},  // 9  Yellow  stripe
+        {0.30f,0.50f,0.95f},  // 10 Blue    stripe
+        {1.00f,0.32f,0.25f},  // 11 Red     stripe
+        {0.65f,0.20f,0.70f},  // 12 Purple  stripe
+        {1.00f,0.60f,0.12f},  // 13 Orange  stripe
+        {0.25f,0.70f,0.30f},  // 14 Green   stripe
+        {0.72f,0.15f,0.15f},  // 15 Maroon  stripe
+    };
+
+    // ── Cue ball at head spot ─────────────────────────────────────────────────
+    drawSphere(shader,
+        glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(CX, ballY, -1.125f)), glm::vec3(ballR)),
+        BC[0]);
+
+    // ── Triangle rack at foot spot ────────────────────────────────────────────
+    // Close-packing: dx = 2R+gap, dz = dx*sin(60°)
+    const float dx  = 2.0f * ballR + 0.005f;    // ≈ 0.145
+    const float dz  = dx * 0.8660254f;            // ≈ 0.1256
+    const float RZ0 = 1.125f;                     // foot spot z
+
+    // Standard 8-ball rack order:
+    //  Row 0: [1]          (tip = 1-ball)
+    //  Row 1: [2, 9]
+    //  Row 2: [3, 8, 10]   (8 in centre)
+    //  Row 3: [4, 14, 7, 12]
+    //  Row 4: [11,13,15, 6, 5]  (stripe left corner, solid right corner)
+    const int order[5][5] = {
+        {  1, -1, -1, -1, -1 },
+        {  2,  9, -1, -1, -1 },
+        {  3,  8, 10, -1, -1 },
+        {  4, 14,  7, 12, -1 },
+        { 11, 13, 15,  6,  5 }
+    };
+
+    for (int row = 0; row < 5; ++row) {
+        int   count = row + 1;
+        float x0    = -(float)row * dx * 0.5f;  // leftmost ball x-offset from CX
+        for (int col = 0; col < count; ++col) {
+            int num = order[row][col];
+            if (num < 0) continue;
+            float px = CX + x0 + col * dx;
+            float pz = RZ0 + row * dz;
+            drawSphere(shader,
+                glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(px, ballY, pz)), glm::vec3(ballR)),
+                BC[num]);
         }
-
-        drawLightCube(VAO, lightCubeShader, backingModel, bracketColor);
-        drawLightCube(VAO, lightCubeShader, bulbModel,    bulbColor);
     }
 }
 
@@ -718,75 +942,58 @@ void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture
     glm::vec3 roofColor  = glm::vec3(0.92f, 0.92f, 0.92f);
     glm::vec3 glassColor = glm::vec3(0.40f, 0.70f, 0.90f);
 
-    // 1. ROOM
-    // Floor
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 0.0f, 0.0f)), glm::vec3(16.0f, 0.1f, 12.0f)), floorColor);
-    // Ceiling
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 6.0f, 0.0f)), glm::vec3(16.0f, 0.1f, 12.0f)), roofColor);
-    // Back wall (North, z=-6)
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, 3.0f, -6.0f)), glm::vec3(16.0f, 6.0f, 0.1f)), wallColor);
+    // 1. ROOM ─────────────────────────────────────────────────────────────────
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,0,0)),       glm::vec3(16.0f,0.1f,12.0f)), floorColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,6.0f,0)),    glm::vec3(16.0f,0.1f,12.0f)), roofColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,3.0f,-6.0f)),glm::vec3(16.0f,6.0f,0.1f)), wallColor);
 
-    // West wall (x=-8) with window
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f, 1.0f, 0.0f)),  glm::vec3(0.1f, 2.0f, 12.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f, 5.0f, 0.0f)),  glm::vec3(0.1f, 2.0f, 12.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f, 3.0f, -4.0f)), glm::vec3(0.1f, 2.0f, 4.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f, 3.0f,  4.0f)), glm::vec3(0.1f, 2.0f, 4.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f, 3.0f,  0.0f)), glm::vec3(0.05f, 2.0f, 4.0f)), glassColor);
+    // West wall with window
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,1.0f, 0)),   glm::vec3(0.1f,2.0f,12.0f)), wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,5.0f, 0)),   glm::vec3(0.1f,2.0f,12.0f)), wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,3.0f,-4.0f)),glm::vec3(0.1f,2.0f,4.0f)),  wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,3.0f, 4.0f)),glm::vec3(0.1f,2.0f,4.0f)),  wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,3.0f, 0)),   glm::vec3(0.05f,2.0f,4.0f)), glassColor);
 
-    // East wall (x=+8) with window
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f, 1.0f, 0.0f)),   glm::vec3(0.1f, 2.0f, 12.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f, 5.0f, 0.0f)),   glm::vec3(0.1f, 2.0f, 12.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f, 3.0f, -4.0f)),  glm::vec3(0.1f, 2.0f, 4.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f, 3.0f,  4.0f)),  glm::vec3(0.1f, 2.0f, 4.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f, 3.0f,  0.0f)),  glm::vec3(0.05f, 2.0f, 4.0f)), glassColor);
+    // East wall with window
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,1.0f, 0)),    glm::vec3(0.1f,2.0f,12.0f)), wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,5.0f, 0)),    glm::vec3(0.1f,2.0f,12.0f)), wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,3.0f,-4.0f)), glm::vec3(0.1f,2.0f,4.0f)),  wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,3.0f, 4.0f)), glm::vec3(0.1f,2.0f,4.0f)),  wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,3.0f, 0)),    glm::vec3(0.05f,2.0f,4.0f)), glassColor);
 
-    // Front wall (South, z=+6) with door
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-4.5f, 3.0f, 6.0f)), glm::vec3(7.0f, 6.0f, 0.1f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 4.5f, 3.0f, 6.0f)), glm::vec3(7.0f, 6.0f, 0.1f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 0.0f, 4.5f, 6.0f)), glm::vec3(2.0f, 3.0f, 0.1f)), wallColor);
-    glm::mat4 door = glm::translate(glm::mat4(1.0f), glm::vec3(-1.0f, 1.5f, 6.0f));
-    door = glm::rotate(door, glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
-    door = glm::translate(door, glm::vec3(1.0f, 0.0f, 0.0f));
-    drawCube(VAO, shader, glm::scale(door, glm::vec3(2.0f, 3.0f, 0.05f)), glm::vec3(0.35f, 0.18f, 0.08f));
+    // South wall with door
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-4.5f,3.0f,6.0f)), glm::vec3(7.0f,6.0f,0.1f)), wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 4.5f,3.0f,6.0f)), glm::vec3(7.0f,6.0f,0.1f)), wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 0.0f,4.5f,6.0f)), glm::vec3(2.0f,3.0f,0.1f)), wallColor);
+    glm::mat4 door = glm::translate(glm::mat4(1.0f), glm::vec3(-1.0f,1.5f,6.0f));
+    door = glm::rotate(door, glm::radians(45.0f), glm::vec3(0,1,0));
+    door = glm::translate(door, glm::vec3(1.0f,0,0));
+    drawCube(VAO, shader, glm::scale(door, glm::vec3(2.0f,3.0f,0.05f)), glm::vec3(0.35f,0.18f,0.08f));
 
-    // 2. POOL (BILLIARDS) TABLE
-    glm::vec3 poolCenter = glm::vec3(-3.0f, 0.8f, 0.0f);
-    glm::vec3 woodColor  = glm::vec3(0.30f, 0.15f, 0.05f);
-    glm::vec3 feltGreen  = glm::vec3(0.08f, 0.45f, 0.18f);
+    // 2. POOL (BILLIARDS) TABLE – realistic with pockets and balls ─────────────
+    drawPoolTable(VAO, shader);
+    drawPoolBalls(shader);
 
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), poolCenter), glm::vec3(3.0f, 0.1f, 4.5f)), feltGreen);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3( 0.0f, 0.1f, -2.3f)), glm::vec3(3.2f, 0.2f, 0.2f)), woodColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3( 0.0f, 0.1f,  2.3f)), glm::vec3(3.2f, 0.2f, 0.2f)), woodColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3(-1.6f, 0.1f,  0.0f)), glm::vec3(0.2f, 0.2f, 4.4f)), woodColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3( 1.6f, 0.1f,  0.0f)), glm::vec3(0.2f, 0.2f, 4.4f)), woodColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3(-1.3f,-0.4f, -2.0f)), glm::vec3(0.2f, 0.8f, 0.2f)), woodColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3( 1.3f,-0.4f, -2.0f)), glm::vec3(0.2f, 0.8f, 0.2f)), woodColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3(-1.3f,-0.4f,  2.0f)), glm::vec3(0.2f, 0.8f, 0.2f)), woodColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3( 1.3f,-0.4f,  2.0f)), glm::vec3(0.2f, 0.8f, 0.2f)), woodColor);
-    // Cue stick
-    glm::mat4 cue = glm::rotate(glm::translate(glm::mat4(1.0f), poolCenter + glm::vec3(0.0f, 0.4f, 1.2f)), glm::radians(-10.0f), glm::vec3(1.0f, 0.0f, 0.0f));
-    drawCube(VAO, shader, glm::scale(cue, glm::vec3(0.04f, 0.04f, 2.5f)), glm::vec3(0.80f, 0.70f, 0.50f));
-
-    // 3. TABLE TENNIS
+    // 3. TABLE TENNIS ─────────────────────────────────────────────────────────
     glm::vec3 ttCenter  = glm::vec3(4.0f, 0.8f, -2.0f);
     glm::vec3 blueTable = glm::vec3(0.10f, 0.30f, 0.70f);
     glm::vec3 metalLegs = glm::vec3(0.20f, 0.20f, 0.20f);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter), glm::vec3(3.0f, 0.05f, 1.6f)), blueTable);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter + glm::vec3(0.0f, 0.10f, 0.0f)), glm::vec3(0.02f, 0.15f, 1.7f)), glm::vec3(0.9f));
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter + glm::vec3(-1.4f,-0.4f,-0.7f)), glm::vec3(0.05f, 0.8f, 0.05f)), metalLegs);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter + glm::vec3(-1.4f,-0.4f, 0.7f)), glm::vec3(0.05f, 0.8f, 0.05f)), metalLegs);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter + glm::vec3( 1.4f,-0.4f,-0.7f)), glm::vec3(0.05f, 0.8f, 0.05f)), metalLegs);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter + glm::vec3( 1.4f,-0.4f, 0.7f)), glm::vec3(0.05f, 0.8f, 0.05f)), metalLegs);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter), glm::vec3(3.0f,0.05f,1.6f)), blueTable);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter+glm::vec3(0,0.10f,0)), glm::vec3(0.02f,0.15f,1.7f)), glm::vec3(0.9f));
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter+glm::vec3(-1.4f,-0.4f,-0.7f)), glm::vec3(0.05f,0.8f,0.05f)), metalLegs);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter+glm::vec3(-1.4f,-0.4f, 0.7f)), glm::vec3(0.05f,0.8f,0.05f)), metalLegs);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter+glm::vec3( 1.4f,-0.4f,-0.7f)), glm::vec3(0.05f,0.8f,0.05f)), metalLegs);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), ttCenter+glm::vec3( 1.4f,-0.4f, 0.7f)), glm::vec3(0.05f,0.8f,0.05f)), metalLegs);
 
-    // 4. CARROM BOARD
+    // 4. CARROM BOARD ─────────────────────────────────────────────────────────
     glm::vec3 carromCenter = glm::vec3(4.0f, 0.6f, 3.0f);
     glm::vec3 frameWood    = glm::vec3(0.30f, 0.15f, 0.05f);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter - glm::vec3(0.0f, 0.3f, 0.0f)), glm::vec3(0.8f, 0.6f, 0.8f)), metalLegs);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter), glm::vec3(1.2f, 0.05f, 1.2f)), glm::vec3(0.80f, 0.60f, 0.40f));
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter + glm::vec3( 0.0f, 0.05f,-0.65f)), glm::vec3(1.4f, 0.1f, 0.1f)), frameWood);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter + glm::vec3( 0.0f, 0.05f, 0.65f)), glm::vec3(1.4f, 0.1f, 0.1f)), frameWood);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter + glm::vec3(-0.65f, 0.05f, 0.0f)), glm::vec3(0.1f, 0.1f, 1.4f)), frameWood);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter + glm::vec3( 0.65f, 0.05f, 0.0f)), glm::vec3(0.1f, 0.1f, 1.4f)), frameWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter-glm::vec3(0,0.3f,0)), glm::vec3(0.8f,0.6f,0.8f)), metalLegs);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter), glm::vec3(1.2f,0.05f,1.2f)), glm::vec3(0.80f,0.60f,0.40f));
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3( 0,0.05f,-0.65f)), glm::vec3(1.4f,0.1f,0.1f)), frameWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3( 0,0.05f, 0.65f)), glm::vec3(1.4f,0.1f,0.1f)), frameWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3(-0.65f,0.05f,0)), glm::vec3(0.1f,0.1f,1.4f)), frameWood);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), carromCenter+glm::vec3( 0.65f,0.05f,0)), glm::vec3(0.1f,0.1f,1.4f)), frameWood);
 }
 
 // ==========================================
@@ -802,7 +1009,7 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) cameraPos -= glm::normalize(glm::cross(cameraFront, cameraUp)) * speed;
     if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) cameraPos += glm::normalize(glm::cross(cameraFront, cameraUp)) * speed;
 
-    // Shading
+    // Shading mode
     if (glfwGetKey(window, GLFW_KEY_G) == GLFW_PRESS) {
         if (!keyProcessed[GLFW_KEY_G]) { useGouraud = true;  cout << "Gouraud Shading\n"; keyProcessed[GLFW_KEY_G] = true; }
     } else keyProcessed[GLFW_KEY_G] = false;
@@ -810,19 +1017,18 @@ void processInput(GLFWwindow* window) {
         if (!keyProcessed[GLFW_KEY_H]) { useGouraud = false; cout << "Phong Shading\n";   keyProcessed[GLFW_KEY_H] = true; }
     } else keyProcessed[GLFW_KEY_H] = false;
 
-    // Texture
+    // Texture mode
     if (glfwGetKey(window, GLFW_KEY_Z) == GLFW_PRESS) {
-        if (!keyProcessed[GLFW_KEY_Z]) { globalTextureMode = 0; cout << "Texture OFF\n";    keyProcessed[GLFW_KEY_Z] = true; }
+        if (!keyProcessed[GLFW_KEY_Z]) { globalTextureMode = 0; cout << "Texture OFF\n";   keyProcessed[GLFW_KEY_Z] = true; }
     } else keyProcessed[GLFW_KEY_Z] = false;
     if (glfwGetKey(window, GLFW_KEY_X) == GLFW_PRESS) {
-        if (!keyProcessed[GLFW_KEY_X]) { globalTextureMode = 1; cout << "Texture ON\n";     keyProcessed[GLFW_KEY_X] = true; }
+        if (!keyProcessed[GLFW_KEY_X]) { globalTextureMode = 1; cout << "Texture ON\n";    keyProcessed[GLFW_KEY_X] = true; }
     } else keyProcessed[GLFW_KEY_X] = false;
     if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS) {
-        if (!keyProcessed[GLFW_KEY_C]) { globalTextureMode = 2; cout << "Texture BLEND\n";  keyProcessed[GLFW_KEY_C] = true; }
+        if (!keyProcessed[GLFW_KEY_C]) { globalTextureMode = 2; cout << "Texture BLEND\n"; keyProcessed[GLFW_KEY_C] = true; }
     } else keyProcessed[GLFW_KEY_C] = false;
 
-    // Light toggles  -  Number row keys
-    // 1-3: Spotlights (above Pool, TT, Carrom)
+    // Spotlights: keys 1-3
     for (int i = 0; i < 3; i++) {
         int key = GLFW_KEY_1 + i;
         if (glfwGetKey(window, key) == GLFW_PRESS) {
@@ -833,33 +1039,33 @@ void processInput(GLFWwindow* window) {
             }
         } else keyProcessed[key] = false;
     }
-    // 4-7: Wall point lights (N, S, E, W)
+    // Wall point lights: keys 4-7
     for (int i = 0; i < 4; i++) {
         int key = GLFW_KEY_4 + i;
         if (glfwGetKey(window, key) == GLFW_PRESS) {
             if (!keyProcessed[key]) {
                 pointLightOn[i] = !pointLightOn[i];
-                const char* walls[] = { "North", "South", "East", "West" };
+                const char* walls[] = { "North","South","East","West" };
                 cout << "Wall Light[" << walls[i] << "] " << (pointLightOn[i] ? "ON" : "OFF") << "\n";
                 keyProcessed[key] = true;
             }
         } else keyProcessed[key] = false;
     }
 
-    // Ambient / Diffuse / Specular  ->  F5 F6 F7
+    // Ambient/Diffuse/Specular: F5-F7
     if (glfwGetKey(window, GLFW_KEY_F5) == GLFW_PRESS) {
-        if (!keyProcessed[GLFW_KEY_F5]) { ambientOn  = !ambientOn;  cout << "Ambient "  << (ambientOn  ? "ON" : "OFF") << "\n"; keyProcessed[GLFW_KEY_F5] = true; }
+        if (!keyProcessed[GLFW_KEY_F5]) { ambientOn  = !ambientOn;  cout << "Ambient "  << (ambientOn  ? "ON":"OFF") << "\n"; keyProcessed[GLFW_KEY_F5] = true; }
     } else keyProcessed[GLFW_KEY_F5] = false;
     if (glfwGetKey(window, GLFW_KEY_F6) == GLFW_PRESS) {
-        if (!keyProcessed[GLFW_KEY_F6]) { diffuseOn  = !diffuseOn;  cout << "Diffuse "  << (diffuseOn  ? "ON" : "OFF") << "\n"; keyProcessed[GLFW_KEY_F6] = true; }
+        if (!keyProcessed[GLFW_KEY_F6]) { diffuseOn  = !diffuseOn;  cout << "Diffuse "  << (diffuseOn  ? "ON":"OFF") << "\n"; keyProcessed[GLFW_KEY_F6] = true; }
     } else keyProcessed[GLFW_KEY_F6] = false;
     if (glfwGetKey(window, GLFW_KEY_F7) == GLFW_PRESS) {
-        if (!keyProcessed[GLFW_KEY_F7]) { specularOn = !specularOn; cout << "Specular " << (specularOn ? "ON" : "OFF") << "\n"; keyProcessed[GLFW_KEY_F7] = true; }
+        if (!keyProcessed[GLFW_KEY_F7]) { specularOn = !specularOn; cout << "Specular " << (specularOn ? "ON":"OFF") << "\n"; keyProcessed[GLFW_KEY_F7] = true; }
     } else keyProcessed[GLFW_KEY_F7] = false;
 
-    // Split view  ->  F9
+    // Split view: F9
     if (glfwGetKey(window, GLFW_KEY_F9) == GLFW_PRESS) {
-        if (!keyProcessed[GLFW_KEY_F9]) { isSplitView = !isSplitView; cout << "Split View " << (isSplitView ? "ON" : "OFF") << "\n"; keyProcessed[GLFW_KEY_F9] = true; }
+        if (!keyProcessed[GLFW_KEY_F9]) { isSplitView = !isSplitView; cout << "Split View " << (isSplitView ? "ON":"OFF") << "\n"; keyProcessed[GLFW_KEY_F9] = true; }
     } else keyProcessed[GLFW_KEY_F9] = false;
 }
 
