@@ -43,6 +43,8 @@ void drawTableTennisPaddles(unsigned int VAO, Shader& shader);
 void drawCarromBoard(unsigned int VAO, Shader& shader);
 void drawCarromPieces(Shader& shader);
 void drawSofa(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 baseColor);
+void setupLampShadeGeometry();
+void drawLampShade(Shader& shader, glm::mat4 model, glm::vec3 color);
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 const unsigned int SCR_WIDTH  = 1200;
@@ -99,6 +101,8 @@ unsigned int sphereVAO, sphereVBO, sphereEBO;
 int          sphereIndexCount = 0;
 unsigned int diskVAO, diskVBO;
 int          diskVertexCount  = 0;
+unsigned int lampVAO, lampVBO, lampEBO;
+int          lampIndexCount = 0;
 
 // ==========================================
 // 1. PHONG VERTEX SHADER
@@ -446,6 +450,7 @@ int main()
     unsigned int poolStickerTexture = loadTexture("resources/Designer.png");
     grassTextureID = loadTexture("resources/grass.jpg");
     wallTextureID  = loadTexture("resources/wall.jpg");
+    floorTextureID = loadTexture("resources/floor.jpg");
 
     // Cube vertex data: positions, normals, tex coords
     float vertices[] = {
@@ -508,6 +513,7 @@ int main()
     // Pool ball spheres (Surface of Revolution) + pocket disks (GL_TRIANGLE_FAN)
     setupSphereGeometry();
     setupDiskGeometry();
+    setupLampShadeGeometry();
 
     glEnable(GL_DEPTH_TEST);
     glEnable(GL_BLEND);
@@ -540,7 +546,7 @@ int main()
             activeShader.use();
             activeShader.setMat4("projection", proj);
             activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID, floorTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
         }
         else {
@@ -553,7 +559,7 @@ int main()
             view = glm::lookAt(eye1, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             drawSkyAndSun(VAO, lightCubeShader, proj, view, eye1);
             activeShader.use(); activeShader.setMat4("projection", proj); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID, floorTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(displayW / 2, displayH / 2, displayW / 2, displayH / 2);
@@ -561,7 +567,7 @@ int main()
             view = glm::lookAt(eye2, glm::vec3(0.0f, 3.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             drawSkyAndSun(VAO, lightCubeShader, proj, view, eye2);
             activeShader.use(); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID, floorTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(0, 0, displayW / 2, displayH / 2);
@@ -569,14 +575,14 @@ int main()
             view = glm::lookAt(eye3, glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             drawSkyAndSun(VAO, lightCubeShader, proj, view, eye3);
             activeShader.use(); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID, floorTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(displayW / 2, 0, displayW / 2, displayH / 2);
             view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
             drawSkyAndSun(VAO, lightCubeShader, proj, view, cameraPos);
             activeShader.use(); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID, floorTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
         }
 
@@ -801,7 +807,103 @@ void drawSphere(Shader& shader, glm::mat4 model, glm::vec3 color) {
     glBindVertexArray(0);
 }
 
-// model matrix must scale XZ by radius; Y scale =1 keeps disk flat
+// ==========================================
+// BEZIER LAMP SHADE SETUP – Surface of Revolution
+// Uses a Cubic Bezier curve for the profile:
+// P(t) = (1-t)^3*P0 + 3(1-t)^2*t*P1 + 3(1-t)*t^2*P2 + t^3*P3
+// ==========================================
+void setupLampShadeGeometry() {
+    const float PI = glm::pi<float>();
+    const int SLICES = 30; // t-steps along the curve
+    const int SIDES  = 40; // angular steps
+
+    // Control points for a bell shape (radius, y)
+    glm::vec2 p0 = glm::vec2(0.08f, 0.40f);
+    glm::vec2 p1 = glm::vec2(0.12f, 0.35f);
+    glm::vec2 p2 = glm::vec2(0.35f, 0.15f);
+    glm::vec2 p3 = glm::vec2(0.38f, 0.00f);
+
+    std::vector<float> verts;
+    std::vector<unsigned int> inds;
+
+    for (int i = 0; i <= SLICES; ++i) {
+        float t = (float)i / (float)SLICES;
+        float u = 1.0f - t;
+        
+        // Position on the Bezier curve
+        glm::vec2 pt = (u * u * u) * p0 + 
+                       (3.0f * u * u * t) * p1 + 
+                       (3.0f * u * t * t) * p2 + 
+                       (t * t * t) * p3;
+        
+        float r = pt.x;
+        float h = pt.y;
+
+        // Normal estimation using Bezier tangent
+        glm::vec2 tangent = 3.0f * u * u * (p1 - p0) + 
+                            6.0f * u * t * (p2 - p1) + 
+                            3.0f * t * t * (p3 - p2);
+        
+        // Normal in the 2D profile plane: rotate tangent (dr, dh) by -90 deg -> (dh, -dr)
+        glm::vec2 profileNormal = glm::normalize(glm::vec2(tangent.y, -tangent.x));
+
+        for (int j = 0; j <= SIDES; ++j) {
+            float theta = (float)j * 2.0f * PI / (float)SIDES;
+            float cosTheta = cosf(theta);
+            float sinTheta = sinf(theta);
+
+            float x = r * cosTheta;
+            float z = -r * sinTheta;
+            float y = h;
+
+            // 3D Normal: rotate profile normal around Y axis
+            float nx = profileNormal.x * cosTheta;
+            float nz = -profileNormal.x * sinTheta;
+            float ny = profileNormal.y;
+
+            float s = (float)j / (float)SIDES;
+            float v = (float)i / (float)SLICES;
+
+            verts.insert(verts.end(), { x, y, z, nx, ny, nz, s, v });
+        }
+    }
+
+    for (int i = 0; i < SLICES; ++i) {
+        for (int j = 0; j < SIDES; ++j) {
+            unsigned int p1 = i * (SIDES + 1) + j;
+            unsigned int p2 = p1 + (SIDES + 1);
+            inds.insert(inds.end(), { p1, p1 + 1, p2, p2, p1 + 1, p2 + 1 });
+        }
+    }
+    lampIndexCount = (int)inds.size();
+
+    glGenVertexArrays(1, &lampVAO);
+    glGenBuffers(1, &lampVBO);
+    glGenBuffers(1, &lampEBO);
+    glBindVertexArray(lampVAO);
+    glBindBuffer(GL_ARRAY_BUFFER, lampVBO);
+    glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(verts.size() * sizeof(float)), verts.data(), GL_STATIC_DRAW);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, lampEBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, (GLsizeiptr)(inds.size() * sizeof(unsigned int)), inds.data(), GL_STATIC_DRAW);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glBindVertexArray(0);
+}
+
+void drawLampShade(Shader& shader, glm::mat4 model, glm::vec3 color) {
+    shader.setMat4("model", model);
+    shader.setVec3("objectColor", color);
+    shader.setVec2("texScale", glm::vec2(1.0f, 1.0f));
+    shader.setInt("textureMode", 0);
+    glBindVertexArray(lampVAO);
+    glDrawElements(GL_TRIANGLES, lampIndexCount, GL_UNSIGNED_INT, 0);
+    glBindVertexArray(0);
+}
+
 void drawDisk(Shader& shader, glm::mat4 model, glm::vec3 color) {
     shader.setMat4("model", model);
     shader.setVec3("objectColor", color);
@@ -857,16 +959,25 @@ void drawAllLights(unsigned int VAO, Shader& lightCubeShader, glm::mat4 projecti
     for (int i = 0; i < 3; i++) {
         if (!spotLightOn[i]) continue;
         glm::vec3 pos = SPOT_POSITIONS[i];
-        float cordLen = 6.0f - (pos.y + 0.13f);
+        
+        // 1. Hanging Cord
+        float cordLen = 6.0f - (pos.y + 0.35f);
         float cordMid = 6.0f - cordLen / 2.0f;
         drawLightCube(VAO, lightCubeShader,
             glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, cordMid, pos.z)),
                        glm::vec3(0.025f, cordLen, 0.025f)), cordColor);
+        
+        // 2. Bezier Lamp Shade (Professional look)
+        // Sitting just below the cord end
+        glm::mat4 shadeM = glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, pos.y + 0.15f, pos.z));
+        shadeM = glm::scale(shadeM, glm::vec3(1.1f, 1.3f, 1.1f)); // Adjust size
+        drawLampShade(lightCubeShader, shadeM, glm::vec3(0.72f, 0.61f, 0.14f)); // Brass/Gold metallic look
+
+        // 3. The Bulb (Emissive cube inside the shade)
+        // Positioned slightly higher to be inside the flare
         drawLightCube(VAO, lightCubeShader,
-            glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, pos.y+0.13f, pos.z)),
-                       glm::vec3(0.12f, 0.10f, 0.12f)), glm::vec3(0.2f));
-        drawLightCube(VAO, lightCubeShader,
-            glm::scale(glm::translate(glm::mat4(1.0f), pos), glm::vec3(0.18f)), bulbColor);
+            glm::scale(glm::translate(glm::mat4(1.0f), pos + glm::vec3(0, 0.15f, 0)), 
+                       glm::vec3(0.12f)), bulbColor);
     }
 
     for (int i = 0; i < 4; i++) {
@@ -1099,7 +1210,7 @@ void drawSofa(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 baseC
 // ==========================================
 // SCENE DRAWING
 // ==========================================
-void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture, unsigned int grassTexture, unsigned int wallTexture) {
+void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture, unsigned int grassTexture, unsigned int wallTexture, unsigned int floorTexture) {
     glm::vec3 wallColor  = glm::vec3(0.85f, 0.88f, 0.90f);
     glm::vec3 floorColor = glm::vec3(0.38f, 0.38f, 0.38f);
     glm::vec3 roofColor  = glm::vec3(0.92f, 0.92f, 0.92f);
@@ -1119,7 +1230,7 @@ void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0.0f, -0.04f, 15.5f)), glm::vec3(2.0f, 0.03f, 19.0f)), pathColor);
 
     // 1. ROOM ─────────────────────────────────────────────────────────────────
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,0,0)),       glm::vec3(16.0f,0.1f,12.0f)), floorColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,0,0)),       glm::vec3(16.0f,0.1f,12.0f)), floorColor, floorTexture, glm::vec2(8.0f, 6.0f));
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,6.0f,0)),    glm::vec3(16.0f,0.1f,12.0f)), roofColor, wallTexToUse, glm::vec2(8.0f, 6.0f));
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,3.0f,-6.0f)),glm::vec3(16.0f,6.0f,0.1f)), wallColor, wallTexToUse, glm::vec2(8.0f, 3.0f));
 
