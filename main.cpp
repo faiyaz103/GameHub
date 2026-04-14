@@ -66,9 +66,9 @@ float lastFrame = 0.0f;
 // ─── Light Sources ───────────────────────────────────────────────────────────
 // 3 Spotlights above game stations; 4 point lights on walls
 const glm::vec3 SPOT_POSITIONS[3] = {
-    glm::vec3(-3.0f, 5.7f,  0.0f),   // Pool Table
-    glm::vec3( 4.0f, 5.7f, -2.0f),   // Table Tennis
-    glm::vec3( 4.0f, 5.7f,  3.0f)    // Carrom Board
+    glm::vec3(-3.0f, 4.5f,  0.0f),   // Pool Table
+    glm::vec3( 4.0f, 4.5f, -2.0f),   // Table Tennis
+    glm::vec3( 4.0f, 4.5f,  3.0f)    // Carrom Board
 };
 const glm::vec3 POINT_POSITIONS[4] = {
     glm::vec3( 0.0f,  5.0f, -5.85f), // North wall
@@ -819,10 +819,10 @@ void setupLampShadeGeometry() {
     const int SIDES  = 40; // angular steps
 
     // Control points for a bell shape (radius, y)
-    glm::vec2 p0 = glm::vec2(0.08f, 0.40f);
-    glm::vec2 p1 = glm::vec2(0.12f, 0.35f);
-    glm::vec2 p2 = glm::vec2(0.35f, 0.15f);
-    glm::vec2 p3 = glm::vec2(0.38f, 0.00f);
+    glm::vec2 p0 = glm::vec2(0.05f, 0.60f); // Top (narrow)
+    glm::vec2 p1 = glm::vec2(0.15f, 0.40f); // Neck
+    glm::vec2 p2 = glm::vec2(0.45f, 0.15f); // Flare
+    glm::vec2 p3 = glm::vec2(0.50f, 0.00f); // Bottom (wide)
 
     std::vector<float> verts;
     std::vector<unsigned int> inds;
@@ -961,23 +961,29 @@ void drawAllLights(unsigned int VAO, Shader& lightCubeShader, glm::mat4 projecti
         if (!spotLightOn[i]) continue;
         glm::vec3 pos = SPOT_POSITIONS[i];
         
+        // Shade dimensions and placement
+        float shadeHeight = 0.6f; // Matches p0.y
+        float shadeTranslationY = pos.y - 0.1f; // Place bulb slightly inside from bottom
+        float shadeTopWorldY = shadeTranslationY + shadeHeight;
+
         // 1. Hanging Cord
-        float cordLen = 6.0f - (pos.y + 0.35f);
+        // Roof is at y=6.0. Cord goes from roof to the top of the lamp shade.
+        float cordLen = 6.0f - shadeTopWorldY;
         float cordMid = 6.0f - cordLen / 2.0f;
         drawLightCube(VAO, lightCubeShader,
             glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, cordMid, pos.z)),
-                       glm::vec3(0.025f, cordLen, 0.025f)), cordColor);
+                       glm::vec3(0.02f, cordLen, 0.02f)), cordColor);
         
-        // 2. Bezier Lamp Shade (Professional look)
-        // Sitting just below the cord end
-        glm::mat4 shadeM = glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, pos.y + 0.15f, pos.z));
-        shadeM = glm::scale(shadeM, glm::vec3(1.1f, 1.3f, 1.1f)); // Adjust size
-        drawLampShade(lightCubeShader, shadeM, glm::vec3(0.72f, 0.61f, 0.14f)); // Brass/Gold metallic look
+        // 2. Bezier Lamp Shade (Professional bell shape)
+        glm::mat4 shadeM = glm::translate(glm::mat4(1.0f), glm::vec3(pos.x, shadeTranslationY, pos.z));
+        // No extra scaling on Y needed if p0.y is already our target height
+        shadeM = glm::scale(shadeM, glm::vec3(1.0f, 1.0f, 1.0f)); 
+        drawLampShade(lightCubeShader, shadeM, glm::vec3(0.72f, 0.61f, 0.14f)); // Brass/Gold
 
         // 3. The Bulb (Emissive cube inside the shade)
-        // Positioned slightly higher to be inside the flare
+        // Positioned at 'pos' so the light originates from within the shade
         drawLightCube(VAO, lightCubeShader,
-            glm::scale(glm::translate(glm::mat4(1.0f), pos + glm::vec3(0, 0.15f, 0)), 
+            glm::scale(glm::translate(glm::mat4(1.0f), pos), 
                        glm::vec3(0.12f)), bulbColor);
     }
 
