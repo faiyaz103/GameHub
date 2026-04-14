@@ -23,7 +23,7 @@ void processInput(GLFWwindow* window);
 unsigned int loadTexture(char const* path);
 void drawCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color, unsigned int textureID = 0, glm::vec2 texScale = glm::vec2(1.0f, 1.0f));
 void drawLightCube(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 color);
-void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture, unsigned int grassTexture);
+void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture, unsigned int grassTexture, unsigned int wallTexture, unsigned int floorTexture);
 void drawSkyAndSun(unsigned int VAO, Shader& lightCubeShader, glm::mat4 projection, glm::mat4 view, glm::vec3 eye);
 void drawAllLights(unsigned int VAO, Shader& lightCubeShader, glm::mat4 projection, glm::mat4 view);
 void setLightUniforms(Shader& shader);
@@ -85,11 +85,14 @@ bool keyProcessed[1024] = { false };
 bool isDoorOpen = true;
 float currentDoorAngle = 45.0f;
 bool grassTextureEnabled = true;
+bool wallTextureEnabled = true;
 
 // ─── Shading / Texture ───────────────────────────────────────────────────────
 bool useGouraud      = false;
 int  globalTextureMode = 1;   // 0=None, 1=Texture, 2=Blend
 unsigned int grassTextureID;
+unsigned int wallTextureID;
+unsigned int floorTextureID;
 
 // ─── Sphere / Disk Geometry (Surface of Revolution) ─────────────────────────
 unsigned int sphereVAO, sphereVBO, sphereEBO;
@@ -442,6 +445,7 @@ int main()
 
     unsigned int poolStickerTexture = loadTexture("resources/Designer.png");
     grassTextureID = loadTexture("resources/grass.jpg");
+    wallTextureID  = loadTexture("resources/wall.jpg");
 
     // Cube vertex data: positions, normals, tex coords
     float vertices[] = {
@@ -536,7 +540,7 @@ int main()
             activeShader.use();
             activeShader.setMat4("projection", proj);
             activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
         }
         else {
@@ -549,7 +553,7 @@ int main()
             view = glm::lookAt(eye1, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             drawSkyAndSun(VAO, lightCubeShader, proj, view, eye1);
             activeShader.use(); activeShader.setMat4("projection", proj); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(displayW / 2, displayH / 2, displayW / 2, displayH / 2);
@@ -557,7 +561,7 @@ int main()
             view = glm::lookAt(eye2, glm::vec3(0.0f, 3.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             drawSkyAndSun(VAO, lightCubeShader, proj, view, eye2);
             activeShader.use(); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(0, 0, displayW / 2, displayH / 2);
@@ -565,14 +569,14 @@ int main()
             view = glm::lookAt(eye3, glm::vec3(0.0f, 2.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
             drawSkyAndSun(VAO, lightCubeShader, proj, view, eye3);
             activeShader.use(); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
 
             glViewport(displayW / 2, 0, displayW / 2, displayH / 2);
             view = glm::lookAt(cameraPos, cameraPos + cameraFront, cameraUp);
             drawSkyAndSun(VAO, lightCubeShader, proj, view, cameraPos);
             activeShader.use(); activeShader.setMat4("view", view);
-            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID);
+            drawGameHubScene(VAO, activeShader, poolStickerTexture, grassTextureID, wallTextureID);
             drawAllLights(VAO, lightCubeShader, proj, view);
         }
 
@@ -1095,13 +1099,15 @@ void drawSofa(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 baseC
 // ==========================================
 // SCENE DRAWING
 // ==========================================
-void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture, unsigned int grassTexture) {
+void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture, unsigned int grassTexture, unsigned int wallTexture) {
     glm::vec3 wallColor  = glm::vec3(0.85f, 0.88f, 0.90f);
     glm::vec3 floorColor = glm::vec3(0.38f, 0.38f, 0.38f);
     glm::vec3 roofColor  = glm::vec3(0.92f, 0.92f, 0.92f);
     glm::vec3 glassColor = glm::vec3(0.40f, 0.70f, 0.90f);
     glm::vec3 grassColor = glm::vec3(0.13f, 0.55f, 0.13f); // Forest Green
     glm::vec3 pathColor  = glm::vec3(0.50f, 0.45f, 0.40f); // Sandy brown path
+
+    unsigned int wallTexToUse = wallTextureEnabled ? wallTexture : 0;
 
     // 0. COMPOUND & PATHWAY ───────────────────────────────────────────────────
     // Large compound area (grass)
@@ -1114,27 +1120,27 @@ void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture
 
     // 1. ROOM ─────────────────────────────────────────────────────────────────
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,0,0)),       glm::vec3(16.0f,0.1f,12.0f)), floorColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,6.0f,0)),    glm::vec3(16.0f,0.1f,12.0f)), roofColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,3.0f,-6.0f)),glm::vec3(16.0f,6.0f,0.1f)), wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,6.0f,0)),    glm::vec3(16.0f,0.1f,12.0f)), roofColor, wallTexToUse, glm::vec2(8.0f, 6.0f));
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(0,3.0f,-6.0f)),glm::vec3(16.0f,6.0f,0.1f)), wallColor, wallTexToUse, glm::vec2(8.0f, 3.0f));
 
     // West wall with window
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,1.0f, 0)),   glm::vec3(0.1f,2.0f,12.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,5.0f, 0)),   glm::vec3(0.1f,2.0f,12.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,3.0f,-4.0f)),glm::vec3(0.1f,2.0f,4.0f)),  wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,3.0f, 4.0f)),glm::vec3(0.1f,2.0f,4.0f)),  wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,1.0f, 0)),   glm::vec3(0.1f,2.0f,12.0f)), wallColor, wallTexToUse, glm::vec2(6.0f, 1.0f));
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,5.0f, 0)),   glm::vec3(0.1f,2.0f,12.0f)), wallColor, wallTexToUse, glm::vec2(6.0f, 1.0f));
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,3.0f,-4.0f)),glm::vec3(0.1f,2.0f,4.0f)),  wallColor, wallTexToUse, glm::vec2(2.0f, 1.0f));
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,3.0f, 4.0f)),glm::vec3(0.1f,2.0f,4.0f)),  wallColor, wallTexToUse, glm::vec2(2.0f, 1.0f));
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-8.0f,3.0f, 0)),   glm::vec3(0.05f,2.0f,4.0f)), glassColor);
 
     // East wall with window
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,1.0f, 0)),    glm::vec3(0.1f,2.0f,12.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,5.0f, 0)),    glm::vec3(0.1f,2.0f,12.0f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,3.0f,-4.0f)), glm::vec3(0.1f,2.0f,4.0f)),  wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,3.0f, 4.0f)), glm::vec3(0.1f,2.0f,4.0f)),  wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,1.0f, 0)),    glm::vec3(0.1f,2.0f,12.0f)), wallColor, wallTexToUse, glm::vec2(6.0f, 1.0f));
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,5.0f, 0)),    glm::vec3(0.1f,2.0f,12.0f)), wallColor, wallTexToUse, glm::vec2(6.0f, 1.0f));
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,3.0f,-4.0f)), glm::vec3(0.1f,2.0f,4.0f)),  wallColor, wallTexToUse, glm::vec2(2.0f, 1.0f));
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,3.0f, 4.0f)), glm::vec3(0.1f,2.0f,4.0f)),  wallColor, wallTexToUse, glm::vec2(2.0f, 1.0f));
     drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(8.0f,3.0f, 0)),    glm::vec3(0.05f,2.0f,4.0f)), glassColor);
 
     // South wall with door
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-4.5f,3.0f,6.0f)), glm::vec3(7.0f,6.0f,0.1f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 4.5f,3.0f,6.0f)), glm::vec3(7.0f,6.0f,0.1f)), wallColor);
-    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 0.0f,4.5f,6.0f)), glm::vec3(2.0f,3.0f,0.1f)), wallColor);
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3(-4.5f,3.0f,6.0f)), glm::vec3(7.0f,6.0f,0.1f)), wallColor, wallTexToUse, glm::vec2(3.5f, 3.0f));
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 4.5f,3.0f,6.0f)), glm::vec3(7.0f,6.0f,0.1f)), wallColor, wallTexToUse, glm::vec2(3.5f, 3.0f));
+    drawCube(VAO, shader, glm::scale(glm::translate(glm::mat4(1.0f), glm::vec3( 0.0f,4.5f,6.0f)), glm::vec3(2.0f,3.0f,0.1f)), wallColor, wallTexToUse, glm::vec2(1.0f, 1.5f));
     float targetAngle = isDoorOpen ? 75.0f : 0.0f;
     if (currentDoorAngle < targetAngle) {
         currentDoorAngle += 150.0f * deltaTime;
@@ -1573,6 +1579,10 @@ void processInput(GLFWwindow* window) {
     if (glfwGetKey(window, GLFW_KEY_9) == GLFW_PRESS) {
         if (!keyProcessed[GLFW_KEY_9]) { grassTextureEnabled = !grassTextureEnabled; cout << "Grass Texture " << (grassTextureEnabled ? "ON":"OFF") << "\n"; keyProcessed[GLFW_KEY_9] = true; }
     } else keyProcessed[GLFW_KEY_9] = false;
+
+    if (glfwGetKey(window, GLFW_KEY_8) == GLFW_PRESS) {
+        if (!keyProcessed[GLFW_KEY_8]) { wallTextureEnabled = !wallTextureEnabled; cout << "Wall Texture " << (wallTextureEnabled ? "ON":"OFF") << "\n"; keyProcessed[GLFW_KEY_8] = true; }
+    } else keyProcessed[GLFW_KEY_8] = false;
 }
 
 // ==========================================
