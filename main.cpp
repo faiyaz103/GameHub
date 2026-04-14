@@ -45,6 +45,7 @@ void drawCarromPieces(Shader& shader);
 void drawSofa(unsigned int VAO, Shader& shader, glm::mat4 model, glm::vec3 baseColor);
 void setupLampShadeGeometry();
 void drawLampShade(Shader& shader, glm::mat4 model, glm::vec3 color);
+void drawFractalTree(unsigned int VAO, Shader& shader, glm::mat4 model, int depth);
 
 // ─── Settings ────────────────────────────────────────────────────────────────
 const unsigned int SCR_WIDTH  = 1200;
@@ -1296,6 +1297,60 @@ void drawGameHubScene(unsigned int VAO, Shader& shader, unsigned int poolTexture
     glm::mat4 carromSofaM = glm::translate(glm::mat4(1.0f), glm::vec3(7.5f, 0.0f, 3.0f));
     carromSofaM = glm::rotate(carromSofaM, glm::radians(-90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     drawSofa(VAO, shader, carromSofaM, glm::vec3(0.55f, 0.15f, 0.15f)); // Red leather
+
+    // 6. FRACTAL TREES ────────────────────────────────────────────────────────
+    // Left Tree
+    glm::mat4 leftTreeM = glm::translate(glm::mat4(1.0f), glm::vec3(-5.0f, 0.0f, 10.0f));
+    drawFractalTree(VAO, shader, leftTreeM, 6);
+
+    // Right Tree
+    glm::mat4 rightTreeM = glm::translate(glm::mat4(1.0f), glm::vec3(5.0f, 0.0f, 10.0f));
+    drawFractalTree(VAO, shader, rightTreeM, 6);
+}
+
+// ==========================================
+// FRACTAL TREE - Recursive Implementation
+// ==========================================
+void drawFractalTree(unsigned int VAO, Shader& shader, glm::mat4 model, int depth) {
+    if (depth == 0) return;
+
+    glm::vec3 trunkColor = glm::vec3(0.40f, 0.25f, 0.15f); // Brown
+    glm::vec3 leafColor  = glm::vec3(0.15f, 0.45f, 0.15f); // Forest Green
+
+    float height = 1.0f;
+    float width  = 0.15f * depth; // Thicker trunk at the bottom
+
+    if (depth == 1) {
+        // Draw many leaves at the tips
+        for (int i = 0; i < 3; i++) {
+             glm::mat4 leafM = glm::rotate(model, glm::radians(i * 120.0f), glm::vec3(0, 1, 0));
+             leafM = glm::scale(leafM, glm::vec3(0.4f, 0.4f, 0.4f));
+             drawCube(VAO, shader, leafM, leafColor);
+        }
+        return;
+    }
+
+    // Draw current branch
+    glm::mat4 branchM = glm::scale(model, glm::vec3(width, height, width));
+    branchM = glm::translate(branchM, glm::vec3(0.0f, 0.5f, 0.0f)); // Center the cube
+    drawCube(VAO, shader, branchM, trunkColor);
+
+    // Prepare for sub-branches
+    glm::mat4 nextM = glm::translate(model, glm::vec3(0.0f, height, 0.0f));
+    nextM = glm::scale(nextM, glm::vec3(0.75f, 0.8f, 0.75f));
+
+    // Three sub-branches splitting off
+    // Branch 1
+    glm::mat4 b1 = glm::rotate(nextM, glm::radians(30.0f), glm::vec3(1.0f, 0.0f, 0.0f));
+    drawFractalTree(VAO, shader, b1, depth - 1);
+
+    // Branch 2
+    glm::mat4 b2 = glm::rotate(nextM, glm::radians(30.0f), glm::vec3(-0.5f, 0.0f, 0.866f));
+    drawFractalTree(VAO, shader, b2, depth - 1);
+
+    // Branch 3
+    glm::mat4 b3 = glm::rotate(nextM, glm::radians(30.0f), glm::vec3(-0.5f, 0.0f, -0.866f));
+    drawFractalTree(VAO, shader, b3, depth - 1);
 }
 
 // ==========================================
